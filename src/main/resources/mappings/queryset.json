@@ -1,0 +1,10 @@
+{
+  "properties": {
+    "id": { "type": "keyword" },
+    "timestamp": { "type": "date", "format": "strict_date_time" },
+    "name": { "type": "keyword" },
+    "description": { "type": "text" },
+    "querySetQueries": { "type": "object" },
+    "sampling": { "type": "keyword" }
+  }
+}
