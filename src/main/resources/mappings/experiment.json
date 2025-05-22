@@ -1,0 +1,13 @@
+{
+  "properties": {
+    "id": { "type": "keyword" },
+    "timestamp": { "type": "date", "format": "strict_date_time" },
+    "type": { "type": "keyword" },
+    "status": { "type": "keyword" },
+    "querySetId": { "type": "keyword" },
+    "searchConfigurationList": { "type": "keyword" },
+    "judgmentList": { "type": "keyword" },
+    "size": {"type":  "keyword"},
+    "results": { "type": "object" }
+  }
+}
