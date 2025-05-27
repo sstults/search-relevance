@@ -13,6 +13,8 @@ import java.io.IOException;
 import java.util.Collections;
 import java.util.Map;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.opensearch.action.search.SearchRequest;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.xcontent.json.JsonXContent;
@@ -29,11 +31,15 @@ import org.opensearch.search.builder.SearchSourceBuilder;
  */
 public class SearchRequestBuilder {
 
+    private static final Logger LOGGER = LogManager.getLogger(SearchRequestBuilder.class);
     private static final NamedXContentRegistry NAMED_CONTENT_REGISTRY;
+    private static final SearchModule SEARCH_MODULE;
+    private static final String QUERY_FIELD_NAME = "query";
+    private static final String SIZE_FIELD_NAME = "size";
 
     static {
-        SearchModule searchModule = new SearchModule(Settings.EMPTY, Collections.emptyList());
-        NAMED_CONTENT_REGISTRY = new NamedXContentRegistry(searchModule.getNamedXContents());
+        SEARCH_MODULE = new SearchModule(Settings.EMPTY, Collections.emptyList());
+        NAMED_CONTENT_REGISTRY = new NamedXContentRegistry(SEARCH_MODULE.getNamedXContents());
     }
 
     /**
@@ -64,7 +70,7 @@ public class SearchRequestBuilder {
             // 1. Custom query types (like hybrid, neural) are not registered in the default QueryBuilders
             // 2. Using WrapperQuery allows passing through any query structure without parsing
             // 3. All other fields (aggregations, source filtering, etc.) can be parsed normally by SearchSourceBuilder
-            Object queryObject = fullQueryMap.remove("query");
+            Object queryObject = fullQueryMap.remove(QUERY_FIELD_NAME);
 
             // Parse everything except query using SearchSourceBuilder.fromXContent
             XContentBuilder builder = JsonXContent.contentBuilder();
@@ -86,6 +92,17 @@ public class SearchRequestBuilder {
                 sourceBuilder.query(QueryBuilders.wrapperQuery(queryBody));
             }
 
+            // Precheck if query contains a different size value
+            if (fullQueryMap.containsKey(SIZE_FIELD_NAME)) {
+                int querySize = ((Number) fullQueryMap.get(SIZE_FIELD_NAME)).intValue();
+                if (querySize != size) {
+                    LOGGER.debug(
+                        "Size mismatch detected. Query size: {}, Search Configuration Input size: {}. Using Search Configuration Input size.",
+                        querySize,
+                        size
+                    );
+                }
+            }
             // Set size
             sourceBuilder.size(size);
 
