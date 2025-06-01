@@ -39,6 +39,7 @@ import org.opensearch.repositories.RepositoriesService;
 import org.opensearch.script.ScriptService;
 import org.opensearch.searchrelevance.dao.EvaluationResultDao;
 import org.opensearch.searchrelevance.dao.ExperimentDao;
+import org.opensearch.searchrelevance.dao.ExperimentVariantDao;
 import org.opensearch.searchrelevance.dao.JudgmentCacheDao;
 import org.opensearch.searchrelevance.dao.JudgmentDao;
 import org.opensearch.searchrelevance.dao.QuerySetDao;
@@ -94,6 +95,7 @@ public class SearchRelevancePluginTests extends OpenSearchTestCase {
         SearchRelevanceIndicesManager.class,
         QuerySetDao.class,
         ExperimentDao.class,
+        ExperimentVariantDao.class,
         SearchConfigurationDao.class,
         JudgmentDao.class,
         EvaluationResultDao.class,
