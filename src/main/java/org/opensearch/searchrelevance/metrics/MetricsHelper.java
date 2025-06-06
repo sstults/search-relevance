@@ -392,7 +392,7 @@ public class MetricsHelper {
                     SearchHit[] hits = response.getHits().getHits();
                     List<String> docIds = Arrays.stream(hits).map(SearchHit::getId).collect(Collectors.toList());
 
-                    Map<String, String> metrics = calculateEvaluationMetrics(docIds, docIdToScores);
+                    Map<String, String> metrics = calculateEvaluationMetrics(docIds, docIdToScores, size);
                     EvaluationResult evaluationResult = new EvaluationResult(
                         evaluationId,
                         TimeUtils.getTimestamp(),
@@ -483,7 +483,7 @@ public class MetricsHelper {
                         SearchHit[] hits = response.getHits().getHits();
                         List<String> docIds = Arrays.stream(hits).map(SearchHit::getId).collect(Collectors.toList());
 
-                        Map<String, String> metrics = calculateEvaluationMetrics(docIds, docIdToScores);
+                        Map<String, String> metrics = calculateEvaluationMetrics(docIds, docIdToScores, size);
                         EvaluationResult evaluationResult = new EvaluationResult(
                             evaluationId,
                             TimeUtils.getTimestamp(),
