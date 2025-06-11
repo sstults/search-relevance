@@ -7,6 +7,7 @@
  */
 package org.opensearch.searchrelevance.transport.experiment;
 
+import static org.opensearch.searchrelevance.common.MetricsConstants.PAIRWISE_FIELD_NAME_QUERY_TEXT;
 import static org.opensearch.searchrelevance.experiment.ExperimentOptionsForHybridSearch.EXPERIMENT_OPTION_COMBINATION_TECHNIQUE;
 import static org.opensearch.searchrelevance.experiment.ExperimentOptionsForHybridSearch.EXPERIMENT_OPTION_NORMALIZATION_TECHNIQUE;
 import static org.opensearch.searchrelevance.experiment.ExperimentOptionsForHybridSearch.EXPERIMENT_OPTION_WEIGHTS_FOR_COMBINATION;
@@ -102,7 +103,7 @@ public class PutExperimentTransportAction extends HandledTransportAction<PutExpe
                 request.getSearchConfigurationList(),
                 request.getJudgmentList(),
                 request.getSize(),
-                new HashMap<>()
+                new ArrayList<>()
             );
 
             // Store initial experiment and return ID immediately
@@ -163,7 +164,7 @@ public class PutExperimentTransportAction extends HandledTransportAction<PutExpe
         Map<String, List<String>> indexAndQueries,
         List<String> queryTexts
     ) {
-        Map<String, Object> finalResults = Collections.synchronizedMap(new HashMap<>());
+        List<Map<String, Object>> finalResults = Collections.synchronizedList(new ArrayList<>());
         AtomicInteger pendingQueries = new AtomicInteger(queryTexts.size());
         AtomicBoolean hasFailure = new AtomicBoolean(false);
 
@@ -184,7 +185,7 @@ public class PutExperimentTransportAction extends HandledTransportAction<PutExpe
         PutExperimentRequest request,
         Map<String, List<String>> indexAndQueries,
         List<String> queryTexts,
-        Map<String, Object> finalResults,
+        List<Map<String, Object>> finalResults,
         AtomicInteger pendingQueries,
         AtomicBoolean hasFailure,
         List<String> judgmentList
@@ -294,7 +295,7 @@ public class PutExperimentTransportAction extends HandledTransportAction<PutExpe
     private void handleQueryResults(
         String queryText,
         Map<String, Object> queryResults,
-        Map<String, Object> finalResults,
+        List<Map<String, Object>> finalResults,
         AtomicInteger pendingQueries,
         String experimentId,
         PutExperimentRequest request,
@@ -305,7 +306,8 @@ public class PutExperimentTransportAction extends HandledTransportAction<PutExpe
 
         try {
             synchronized (finalResults) {
-                finalResults.put(queryText, queryResults);
+                queryResults.put(PAIRWISE_FIELD_NAME_QUERY_TEXT, queryText);
+                finalResults.add(queryResults);
                 if (pendingQueries.decrementAndGet() == 0) {
                     updateFinalExperiment(experimentId, request, finalResults, judgmentList);
                 }
@@ -324,7 +326,7 @@ public class PutExperimentTransportAction extends HandledTransportAction<PutExpe
     private void updateFinalExperiment(
         String experimentId,
         PutExperimentRequest request,
-        Map<String, Object> finalResults,
+        List<Map<String, Object>> finalResults,
         List<String> judgmentList
     ) {
         Experiment finalExperiment = new Experiment(
@@ -360,7 +362,7 @@ public class PutExperimentTransportAction extends HandledTransportAction<PutExpe
             request.getSearchConfigurationList(),
             request.getJudgmentList(),
             request.getSize(),
-            Map.of("error", error.getMessage())
+            List.of(Map.of("error", error.getMessage()))
         );
 
         experimentDao.updateExperiment(
