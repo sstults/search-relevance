@@ -53,7 +53,7 @@ public class JudgmentsIT extends BaseSearchRelevanceIT {
 
         String getJudgmentsByIdUrl = String.join("/", JUDGMENT_INDEX, "_doc", judgmentsId);
         Response getJudgmentsResponse = makeRequest(
-            client(),
+            adminClient(),
             RestRequest.Method.GET.name(),
             getJudgmentsByIdUrl,
             null,
