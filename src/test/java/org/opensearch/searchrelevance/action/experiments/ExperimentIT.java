@@ -449,7 +449,7 @@ public class ExperimentIT extends BaseSearchRelevanceIT {
 
         while (("PROCESSING".equals(status) || status == null) && retryCount < MAX_POLL_RETRIES) {
             Response getExperimentResponse = makeRequest(
-                client(),
+                adminClient(),
                 RestRequest.Method.GET.name(),
                 getExperimentByIdUrl,
                 null,
