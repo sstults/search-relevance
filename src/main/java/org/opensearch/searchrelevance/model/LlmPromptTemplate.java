@@ -5,8 +5,11 @@
  * this file be licensed under the Apache-2.0 license or a
  * compatible open source license.
  */
-
 package org.opensearch.searchrelevance.model;
+
+import java.io.IOException;
+import java.util.Map;
+import java.util.Objects;
 
 import org.opensearch.core.common.io.stream.StreamInput;
 import org.opensearch.core.common.io.stream.StreamOutput;
@@ -15,28 +18,25 @@ import org.opensearch.core.xcontent.ToXContentObject;
 import org.opensearch.core.xcontent.XContentBuilder;
 import org.opensearch.core.xcontent.XContentParser;
 
-import java.io.IOException;
-import java.util.Objects;
-
 /**
  * Model class for LLM prompt templates
  */
 public class LlmPromptTemplate implements ToXContentObject, Writeable {
-    
+
     public static final String TEMPLATE_ID_FIELD = "template_id";
     public static final String NAME_FIELD = "name";
     public static final String DESCRIPTION_FIELD = "description";
     public static final String TEMPLATE_FIELD = "template";
     public static final String CREATED_TIME_FIELD = "created_time";
     public static final String LAST_UPDATED_TIME_FIELD = "last_updated_time";
-    
+
     private final String templateId;
     private final String name;
     private final String description;
     private final String template;
     private final Long createdTime;
     private final Long lastUpdatedTime;
-    
+
     public LlmPromptTemplate(String templateId, String name, String description, String template, Long createdTime, Long lastUpdatedTime) {
         this.templateId = templateId;
         this.name = name;
@@ -45,7 +45,7 @@ public class LlmPromptTemplate implements ToXContentObject, Writeable {
         this.createdTime = createdTime;
         this.lastUpdatedTime = lastUpdatedTime;
     }
-    
+
     public LlmPromptTemplate(StreamInput input) throws IOException {
         this.templateId = input.readString();
         this.name = input.readString();
@@ -54,7 +54,7 @@ public class LlmPromptTemplate implements ToXContentObject, Writeable {
         this.createdTime = input.readOptionalLong();
         this.lastUpdatedTime = input.readOptionalLong();
     }
-    
+
     @Override
     public void writeTo(StreamOutput out) throws IOException {
         out.writeString(templateId);
@@ -64,7 +64,7 @@ public class LlmPromptTemplate implements ToXContentObject, Writeable {
         out.writeOptionalLong(createdTime);
         out.writeOptionalLong(lastUpdatedTime);
     }
-    
+
     @Override
     public XContentBuilder toXContent(XContentBuilder builder, Params params) throws IOException {
         builder.startObject();
@@ -83,7 +83,7 @@ public class LlmPromptTemplate implements ToXContentObject, Writeable {
         builder.endObject();
         return builder;
     }
-    
+
     public static LlmPromptTemplate parse(XContentParser parser) throws IOException {
         String templateId = null;
         String name = null;
@@ -91,17 +91,17 @@ public class LlmPromptTemplate implements ToXContentObject, Writeable {
         String template = null;
         Long createdTime = null;
         Long lastUpdatedTime = null;
-        
+
         XContentParser.Token token = parser.currentToken();
         if (token != XContentParser.Token.START_OBJECT) {
             token = parser.nextToken();
         }
-        
+
         while ((token = parser.nextToken()) != XContentParser.Token.END_OBJECT) {
             if (token == XContentParser.Token.FIELD_NAME) {
                 String fieldName = parser.currentName();
                 token = parser.nextToken();
-                
+
                 switch (fieldName) {
                     case TEMPLATE_ID_FIELD:
                         templateId = parser.text();
@@ -127,62 +127,85 @@ public class LlmPromptTemplate implements ToXContentObject, Writeable {
                 }
             }
         }
-        
+
         return new LlmPromptTemplate(templateId, name, description, template, createdTime, lastUpdatedTime);
     }
-    
+
+    public static LlmPromptTemplate fromXContent(Map<String, Object> source) {
+        String templateId = (String) source.get(TEMPLATE_ID_FIELD);
+        String name = (String) source.get(NAME_FIELD);
+        String description = (String) source.get(DESCRIPTION_FIELD);
+        String template = (String) source.get(TEMPLATE_FIELD);
+        Long createdTime = source.get(CREATED_TIME_FIELD) != null ? ((Number) source.get(CREATED_TIME_FIELD)).longValue() : null;
+        Long lastUpdatedTime = source.get(LAST_UPDATED_TIME_FIELD) != null
+            ? ((Number) source.get(LAST_UPDATED_TIME_FIELD)).longValue()
+            : null;
+
+        return new LlmPromptTemplate(templateId, name, description, template, createdTime, lastUpdatedTime);
+    }
+
     // Getters
     public String getTemplateId() {
         return templateId;
     }
-    
+
     public String getName() {
         return name;
     }
-    
+
     public String getDescription() {
         return description;
     }
-    
+
     public String getTemplate() {
         return template;
     }
-    
+
     public Long getCreatedTime() {
         return createdTime;
     }
-    
+
     public Long getLastUpdatedTime() {
         return lastUpdatedTime;
     }
-    
+
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         LlmPromptTemplate that = (LlmPromptTemplate) o;
-        return Objects.equals(templateId, that.templateId) &&
-               Objects.equals(name, that.name) &&
-               Objects.equals(description, that.description) &&
-               Objects.equals(template, that.template) &&
-               Objects.equals(createdTime, that.createdTime) &&
-               Objects.equals(lastUpdatedTime, that.lastUpdatedTime);
+        return Objects.equals(templateId, that.templateId)
+            && Objects.equals(name, that.name)
+            && Objects.equals(description, that.description)
+            && Objects.equals(template, that.template)
+            && Objects.equals(createdTime, that.createdTime)
+            && Objects.equals(lastUpdatedTime, that.lastUpdatedTime);
     }
-    
+
     @Override
     public int hashCode() {
         return Objects.hash(templateId, name, description, template, createdTime, lastUpdatedTime);
     }
-    
+
     @Override
     public String toString() {
-        return "LlmPromptTemplate{" +
-               "templateId='" + templateId + '\'' +
-               ", name='" + name + '\'' +
-               ", description='" + description + '\'' +
-               ", template='" + template + '\'' +
-               ", createdTime=" + createdTime +
-               ", lastUpdatedTime=" + lastUpdatedTime +
-               '}';
+        return "LlmPromptTemplate{"
+            + "templateId='"
+            + templateId
+            + '\''
+            + ", name='"
+            + name
+            + '\''
+            + ", description='"
+            + description
+            + '\''
+            + ", template='"
+            + template
+            + '\''
+            + ", createdTime="
+            + createdTime
+            + ", lastUpdatedTime="
+            + lastUpdatedTime
+            + '}';
     }
 }

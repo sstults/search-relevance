@@ -42,11 +42,18 @@ import org.opensearch.repositories.RepositoriesService;
 import org.opensearch.rest.RestController;
 import org.opensearch.rest.RestHandler;
 import org.opensearch.script.ScriptService;
+import org.opensearch.searchrelevance.action.llmprompttemplate.DeleteLlmPromptTemplateAction;
+import org.opensearch.searchrelevance.action.llmprompttemplate.DeleteLlmPromptTemplateTransportAction;
+import org.opensearch.searchrelevance.action.llmprompttemplate.GetLlmPromptTemplateAction;
+import org.opensearch.searchrelevance.action.llmprompttemplate.GetLlmPromptTemplateTransportAction;
+import org.opensearch.searchrelevance.action.llmprompttemplate.PutLlmPromptTemplateAction;
+import org.opensearch.searchrelevance.action.llmprompttemplate.PutLlmPromptTemplateTransportAction;
 import org.opensearch.searchrelevance.dao.EvaluationResultDao;
 import org.opensearch.searchrelevance.dao.ExperimentDao;
 import org.opensearch.searchrelevance.dao.ExperimentVariantDao;
 import org.opensearch.searchrelevance.dao.JudgmentCacheDao;
 import org.opensearch.searchrelevance.dao.JudgmentDao;
+import org.opensearch.searchrelevance.dao.LlmPromptTemplateDao;
 import org.opensearch.searchrelevance.dao.QuerySetDao;
 import org.opensearch.searchrelevance.dao.SearchConfigurationDao;
 import org.opensearch.searchrelevance.indices.SearchRelevanceIndicesManager;
@@ -55,14 +62,17 @@ import org.opensearch.searchrelevance.ml.MLAccessor;
 import org.opensearch.searchrelevance.rest.RestCreateQuerySetAction;
 import org.opensearch.searchrelevance.rest.RestDeleteExperimentAction;
 import org.opensearch.searchrelevance.rest.RestDeleteJudgmentAction;
+import org.opensearch.searchrelevance.rest.RestDeleteLlmPromptTemplateAction;
 import org.opensearch.searchrelevance.rest.RestDeleteQuerySetAction;
 import org.opensearch.searchrelevance.rest.RestDeleteSearchConfigurationAction;
 import org.opensearch.searchrelevance.rest.RestGetExperimentAction;
 import org.opensearch.searchrelevance.rest.RestGetJudgmentAction;
+import org.opensearch.searchrelevance.rest.RestGetLlmPromptTemplateAction;
 import org.opensearch.searchrelevance.rest.RestGetQuerySetAction;
 import org.opensearch.searchrelevance.rest.RestGetSearchConfigurationAction;
 import org.opensearch.searchrelevance.rest.RestPutExperimentAction;
 import org.opensearch.searchrelevance.rest.RestPutJudgmentAction;
+import org.opensearch.searchrelevance.rest.RestPutLlmPromptTemplateAction;
 import org.opensearch.searchrelevance.rest.RestPutQuerySetAction;
 import org.opensearch.searchrelevance.rest.RestPutSearchConfigurationAction;
 import org.opensearch.searchrelevance.rest.RestSearchRelevanceStatsAction;
@@ -117,6 +127,7 @@ public class SearchRelevancePlugin extends Plugin implements ActionPlugin, Syste
     private JudgmentDao judgmentDao;
     private EvaluationResultDao evaluationResultDao;
     private JudgmentCacheDao judgmentCacheDao;
+    private LlmPromptTemplateDao llmPromptTemplateDao;
     private MLAccessor mlAccessor;
     private MetricsHelper metricsHelper;
     private SearchRelevanceSettingsAccessor settingsAccessor;
@@ -155,6 +166,7 @@ public class SearchRelevancePlugin extends Plugin implements ActionPlugin, Syste
         this.judgmentDao = new JudgmentDao(searchRelevanceIndicesManager);
         this.evaluationResultDao = new EvaluationResultDao(searchRelevanceIndicesManager);
         this.judgmentCacheDao = new JudgmentCacheDao(searchRelevanceIndicesManager);
+        this.llmPromptTemplateDao = new LlmPromptTemplateDao(searchRelevanceIndicesManager);
         MachineLearningNodeClient mlClient = new MachineLearningNodeClient(client);
         this.mlAccessor = new MLAccessor(mlClient);
         this.metricsHelper = new MetricsHelper(clusterService, client, judgmentDao, evaluationResultDao, experimentVariantDao);
@@ -172,6 +184,7 @@ public class SearchRelevancePlugin extends Plugin implements ActionPlugin, Syste
             judgmentDao,
             evaluationResultDao,
             judgmentCacheDao,
+            llmPromptTemplateDao,
             mlAccessor,
             metricsHelper,
             infoStatsManager
@@ -202,6 +215,9 @@ public class SearchRelevancePlugin extends Plugin implements ActionPlugin, Syste
             new RestPutExperimentAction(settingsAccessor),
             new RestGetExperimentAction(settingsAccessor),
             new RestDeleteExperimentAction(settingsAccessor),
+            new RestPutLlmPromptTemplateAction(),
+            new RestGetLlmPromptTemplateAction(),
+            new RestDeleteLlmPromptTemplateAction(),
             new RestSearchRelevanceStatsAction(settingsAccessor, clusterUtil)
         );
     }
@@ -222,6 +238,9 @@ public class SearchRelevancePlugin extends Plugin implements ActionPlugin, Syste
             new ActionHandler<>(PutExperimentAction.INSTANCE, PutExperimentTransportAction.class),
             new ActionHandler<>(DeleteExperimentAction.INSTANCE, DeleteExperimentTransportAction.class),
             new ActionHandler<>(GetExperimentAction.INSTANCE, GetExperimentTransportAction.class),
+            new ActionHandler<>(PutLlmPromptTemplateAction.INSTANCE, PutLlmPromptTemplateTransportAction.class),
+            new ActionHandler<>(GetLlmPromptTemplateAction.INSTANCE, GetLlmPromptTemplateTransportAction.class),
+            new ActionHandler<>(DeleteLlmPromptTemplateAction.INSTANCE, DeleteLlmPromptTemplateTransportAction.class),
             new ActionHandler<>(SearchRelevanceStatsAction.INSTANCE, SearchRelevanceStatsTransportAction.class)
         );
     }
