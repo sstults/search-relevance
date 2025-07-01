@@ -17,6 +17,8 @@ import static org.opensearch.searchrelevance.common.PluginConstants.JUDGMENT_CAC
 import static org.opensearch.searchrelevance.common.PluginConstants.JUDGMENT_CACHE_INDEX_MAPPING;
 import static org.opensearch.searchrelevance.common.PluginConstants.JUDGMENT_INDEX;
 import static org.opensearch.searchrelevance.common.PluginConstants.JUDGMENT_INDEX_MAPPING;
+import static org.opensearch.searchrelevance.common.PluginConstants.LLM_PROMPT_TEMPLATE_INDEX;
+import static org.opensearch.searchrelevance.common.PluginConstants.LLM_PROMPT_TEMPLATE_INDEX_MAPPING;
 import static org.opensearch.searchrelevance.common.PluginConstants.QUERY_SET_INDEX;
 import static org.opensearch.searchrelevance.common.PluginConstants.QUERY_SET_INDEX_MAPPING;
 import static org.opensearch.searchrelevance.common.PluginConstants.SEARCH_CONFIGURATION_INDEX;
@@ -66,7 +68,12 @@ public enum SearchRelevanceIndices {
     /**
      * Experiment Variant Index
      */
-    EXPERIMENT_VARIANT(EXPERIMENT_VARIANT_INDEX, EXPERIMENT_VARIANT_INDEX_MAPPING, false);
+    EXPERIMENT_VARIANT(EXPERIMENT_VARIANT_INDEX, EXPERIMENT_VARIANT_INDEX_MAPPING, false),
+
+    /**
+     * LLM Prompt Template Index
+     */
+    LLM_PROMPT_TEMPLATE(LLM_PROMPT_TEMPLATE_INDEX, LLM_PROMPT_TEMPLATE_INDEX_MAPPING, false);
 
     private final String indexName;
     private final String mapping;
