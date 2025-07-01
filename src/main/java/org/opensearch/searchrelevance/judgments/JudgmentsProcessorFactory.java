@@ -9,6 +9,7 @@ package org.opensearch.searchrelevance.judgments;
 
 import org.opensearch.common.inject.Inject;
 import org.opensearch.searchrelevance.dao.JudgmentCacheDao;
+import org.opensearch.searchrelevance.dao.LlmPromptTemplateDao;
 import org.opensearch.searchrelevance.dao.QuerySetDao;
 import org.opensearch.searchrelevance.dao.SearchConfigurationDao;
 import org.opensearch.searchrelevance.ml.MLAccessor;
@@ -20,7 +21,7 @@ public class JudgmentsProcessorFactory {
     private final QuerySetDao querySetDao;
     private final SearchConfigurationDao searchConfigurationDao;
     private final JudgmentCacheDao judgmentCacheDao;
-
+    private final LlmPromptTemplateDao llmPromptTemplateDao;
     private final Client client;
 
     @Inject
@@ -29,18 +30,27 @@ public class JudgmentsProcessorFactory {
         QuerySetDao querySetDao,
         SearchConfigurationDao searchConfigurationDao,
         JudgmentCacheDao judgmentCacheDao,
+        LlmPromptTemplateDao llmPromptTemplateDao,
         Client client
     ) {
         this.mlAccessor = mlAccessor;
         this.querySetDao = querySetDao;
         this.searchConfigurationDao = searchConfigurationDao;
         this.judgmentCacheDao = judgmentCacheDao;
+        this.llmPromptTemplateDao = llmPromptTemplateDao;
         this.client = client;
     }
 
     public BaseJudgmentsProcessor getProcessor(JudgmentType type) {
         return switch (type) {
-            case LLM_JUDGMENT -> new LlmJudgmentsProcessor(mlAccessor, querySetDao, searchConfigurationDao, judgmentCacheDao, client);
+            case LLM_JUDGMENT -> new LlmJudgmentsProcessor(
+                mlAccessor,
+                querySetDao,
+                searchConfigurationDao,
+                judgmentCacheDao,
+                llmPromptTemplateDao,
+                client
+            );
             case UBI_JUDGMENT -> new UbiJudgmentsProcessor(client);
             case IMPORT_JUDGMENT -> new ImportJudgmentsProcessor(client);
             default -> throw new IllegalArgumentException("Unsupported judgment type: " + type);

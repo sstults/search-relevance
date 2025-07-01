@@ -86,6 +86,7 @@ public class PluginConstants {
     public static final String JUDGMENT_RATINGS = "judgmentRatings";
     public static final String CONTEXT_FIELDS = "contextFields";
     public static final String IGNORE_FAILURE = "ignoreFailure";
+    public static final String TEMPLATE_ID = "templateId";
 
     public static final int DEFAULTED_QUERY_SET_SIZE = 10;
     public static final String MANUAL = "manual";

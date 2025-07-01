@@ -22,6 +22,7 @@ import static org.opensearch.searchrelevance.common.PluginConstants.NAX_RANK;
 import static org.opensearch.searchrelevance.common.PluginConstants.QUERYSET_ID;
 import static org.opensearch.searchrelevance.common.PluginConstants.SEARCH_CONFIGURATION_LIST;
 import static org.opensearch.searchrelevance.common.PluginConstants.SIZE;
+import static org.opensearch.searchrelevance.common.PluginConstants.TEMPLATE_ID;
 import static org.opensearch.searchrelevance.common.PluginConstants.TYPE;
 
 import java.io.IOException;
@@ -121,6 +122,7 @@ public class RestPutJudgmentAction extends BaseRestHandler {
 
                 int tokenLimit = validateTokenLimit(source);
                 List<String> contextFields = ParserUtils.convertObjToList(source, CONTEXT_FIELDS);
+                String templateId = (String) source.get(TEMPLATE_ID); // Optional parameter
                 createRequest = new PutLlmJudgmentRequest(
                     type,
                     name,
@@ -131,7 +133,8 @@ public class RestPutJudgmentAction extends BaseRestHandler {
                     size,
                     tokenLimit,
                     contextFields,
-                    ignoreFailure
+                    ignoreFailure,
+                    templateId
                 );
             }
             case UBI_JUDGMENT -> {

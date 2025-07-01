@@ -41,6 +41,11 @@ public class PutLlmJudgmentRequest extends PutJudgmentRequest {
      */
     private boolean ignoreFailure;
 
+    /**
+     * Optional template ID for custom LLM prompts. If not provided, uses default prompt.
+     */
+    private String templateId;
+
     public PutLlmJudgmentRequest(
         @NonNull JudgmentType type,
         @NonNull String name,
@@ -51,7 +56,8 @@ public class PutLlmJudgmentRequest extends PutJudgmentRequest {
         int size,
         int tokenLimit,
         List<String> contextFields,
-        boolean ignoreFailure
+        boolean ignoreFailure,
+        String templateId
     ) {
         super(type, name, description);
         this.modelId = modelId;
@@ -61,6 +67,7 @@ public class PutLlmJudgmentRequest extends PutJudgmentRequest {
         this.tokenLimit = tokenLimit;
         this.contextFields = contextFields;
         this.ignoreFailure = ignoreFailure;
+        this.templateId = templateId;
     }
 
     public PutLlmJudgmentRequest(StreamInput in) throws IOException {
@@ -72,6 +79,7 @@ public class PutLlmJudgmentRequest extends PutJudgmentRequest {
         this.tokenLimit = in.readOptionalInt();
         this.contextFields = in.readOptionalStringList();
         this.ignoreFailure = Boolean.TRUE.equals(in.readOptionalBoolean()); // by defaulted as false if not provided
+        this.templateId = in.readOptionalString();
     }
 
     @Override
@@ -84,6 +92,7 @@ public class PutLlmJudgmentRequest extends PutJudgmentRequest {
         out.writeOptionalInt(tokenLimit);
         out.writeOptionalStringArray(contextFields.toArray(new String[0]));
         out.writeOptionalBoolean(ignoreFailure);
+        out.writeOptionalString(templateId);
     }
 
     public String getModelId() {
@@ -112,6 +121,10 @@ public class PutLlmJudgmentRequest extends PutJudgmentRequest {
 
     public boolean isIgnoreFailure() {
         return ignoreFailure;
+    }
+
+    public String getTemplateId() {
+        return templateId;
     }
 
 }

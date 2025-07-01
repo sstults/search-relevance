@@ -34,10 +34,12 @@ import org.opensearch.action.search.SearchRequest;
 import org.opensearch.action.search.SearchResponse;
 import org.opensearch.action.support.PlainActionFuture;
 import org.opensearch.common.inject.Inject;
+import org.opensearch.common.xcontent.XContentFactory;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.rest.RestStatus;
 import org.opensearch.search.SearchHit;
 import org.opensearch.searchrelevance.dao.JudgmentCacheDao;
+import org.opensearch.searchrelevance.dao.LlmPromptTemplateDao;
 import org.opensearch.searchrelevance.dao.QuerySetDao;
 import org.opensearch.searchrelevance.dao.SearchConfigurationDao;
 import org.opensearch.searchrelevance.exception.SearchRelevanceException;
@@ -45,10 +47,12 @@ import org.opensearch.searchrelevance.ml.ChunkResult;
 import org.opensearch.searchrelevance.ml.MLAccessor;
 import org.opensearch.searchrelevance.model.JudgmentCache;
 import org.opensearch.searchrelevance.model.JudgmentType;
+import org.opensearch.searchrelevance.model.LlmPromptTemplate;
 import org.opensearch.searchrelevance.model.QuerySet;
 import org.opensearch.searchrelevance.model.SearchConfiguration;
 import org.opensearch.searchrelevance.stats.events.EventStatName;
 import org.opensearch.searchrelevance.stats.events.EventStatsManager;
+import org.opensearch.searchrelevance.utils.TemplateUtils;
 import org.opensearch.searchrelevance.utils.TimeUtils;
 import org.opensearch.transport.client.Client;
 
@@ -63,6 +67,7 @@ public class LlmJudgmentsProcessor implements BaseJudgmentsProcessor {
     private final QuerySetDao querySetDao;
     private final SearchConfigurationDao searchConfigurationDao;
     private final JudgmentCacheDao judgmentCacheDao;
+    private final LlmPromptTemplateDao llmPromptTemplateDao;
     private final Client client;
 
     @Inject
@@ -71,12 +76,14 @@ public class LlmJudgmentsProcessor implements BaseJudgmentsProcessor {
         QuerySetDao querySetDao,
         SearchConfigurationDao searchConfigurationDao,
         JudgmentCacheDao judgmentCacheDao,
+        LlmPromptTemplateDao llmPromptTemplateDao,
         Client client
     ) {
         this.mlAccessor = mlAccessor;
         this.querySetDao = querySetDao;
         this.searchConfigurationDao = searchConfigurationDao;
         this.judgmentCacheDao = judgmentCacheDao;
+        this.llmPromptTemplateDao = llmPromptTemplateDao;
         this.client = client;
     }
 
@@ -98,6 +105,9 @@ public class LlmJudgmentsProcessor implements BaseJudgmentsProcessor {
             List<String> contextFields = (List<String>) metadata.get("contextFields");
             boolean ignoreFailure = (boolean) metadata.get("ignoreFailure");
 
+            // Optional template support
+            String templateId = (String) metadata.get("templateId");
+
             QuerySet querySet = querySetDao.getQuerySetSync(querySetId);
             List<SearchConfiguration> searchConfigurations = searchConfigurationList.stream()
                 .map(id -> searchConfigurationDao.getSearchConfigurationSync(id))
@@ -110,7 +120,8 @@ public class LlmJudgmentsProcessor implements BaseJudgmentsProcessor {
                 contextFields,
                 querySet,
                 searchConfigurations,
-                ignoreFailure
+                ignoreFailure,
+                templateId
             );
 
             listener.onResponse(judgments);
@@ -129,6 +140,19 @@ public class LlmJudgmentsProcessor implements BaseJudgmentsProcessor {
         List<SearchConfiguration> searchConfigurations,
         boolean ignoreFailure
     ) {
+        return generateLLMJudgments(modelId, size, tokenLimit, contextFields, querySet, searchConfigurations, ignoreFailure, null);
+    }
+
+    private List<Map<String, Object>> generateLLMJudgments(
+        String modelId,
+        int size,
+        int tokenLimit,
+        List<String> contextFields,
+        QuerySet querySet,
+        List<SearchConfiguration> searchConfigurations,
+        boolean ignoreFailure,
+        String templateId
+    ) {
         List<String> queryTextWithReferences = querySet.querySetQueries().stream().map(e -> e.queryText()).collect(Collectors.toList());
 
         List<Map<String, Object>> allJudgments = new ArrayList<>();
@@ -142,7 +166,8 @@ public class LlmJudgmentsProcessor implements BaseJudgmentsProcessor {
                     contextFields,
                     searchConfigurations,
                     queryTextWithReference,
-                    ignoreFailure
+                    ignoreFailure,
+                    templateId
                 );
 
                 Map<String, Object> judgmentForQuery = new HashMap<>();
@@ -175,6 +200,28 @@ public class LlmJudgmentsProcessor implements BaseJudgmentsProcessor {
         List<SearchConfiguration> searchConfigurations,
         String queryTextWithReference,
         boolean ignoreFailure
+    ) {
+        return processQueryText(
+            modelId,
+            size,
+            tokenLimit,
+            contextFields,
+            searchConfigurations,
+            queryTextWithReference,
+            ignoreFailure,
+            null
+        );
+    }
+
+    private Map<String, String> processQueryText(
+        String modelId,
+        int size,
+        int tokenLimit,
+        List<String> contextFields,
+        List<SearchConfiguration> searchConfigurations,
+        String queryTextWithReference,
+        boolean ignoreFailure,
+        String templateId
     ) {
         Map<String, String> unionHits = new HashMap<>();
         ConcurrentMap<String, String> docIdToScore = new ConcurrentHashMap<>();
@@ -243,6 +290,7 @@ public class LlmJudgmentsProcessor implements BaseJudgmentsProcessor {
                     unionHits,
                     docIdToScore,
                     ignoreFailure,
+                    templateId,
                     llmFuture
                 );
                 llmRatings = llmFuture.actionGet();
@@ -270,6 +318,7 @@ public class LlmJudgmentsProcessor implements BaseJudgmentsProcessor {
      * @param unprocessedUnionHits - hits pending judged
      * @param docIdToRating - map to store the judgment ratings
      * @param ignoreFailure - boolean to determine how to error handling
+     * @param templateId - optional template ID for custom prompt
      */
     private void generateLLMJudgmentForQueryText(
         String modelId,
@@ -279,6 +328,7 @@ public class LlmJudgmentsProcessor implements BaseJudgmentsProcessor {
         Map<String, String> unprocessedUnionHits,
         Map<String, String> docIdToRating,
         boolean ignoreFailure,
+        String templateId,
         ActionListener<Map<String, String>> listener
     ) {
         LOGGER.debug("calculating LLM evaluation with modelId: {} and unprocessed unionHits: {}", modelId, unprocessedUnionHits);
@@ -299,6 +349,53 @@ public class LlmJudgmentsProcessor implements BaseJudgmentsProcessor {
         ConcurrentMap<Integer, List<Map<String, Object>>> combinedResponses = new ConcurrentHashMap<>();
         AtomicBoolean hasFailure = new AtomicBoolean(false); // Add flag to track if any failure has occurred
 
+        // Retrieve and process template if templateId is provided
+        String customPrompt = null;
+        if (templateId != null && !templateId.trim().isEmpty()) {
+            try {
+                LOGGER.info("Retrieving template with ID: {}", templateId);
+                PlainActionFuture<SearchResponse> templateFuture = PlainActionFuture.newFuture();
+                llmPromptTemplateDao.getLlmPromptTemplate(templateId, templateFuture);
+                SearchResponse templateResponse = templateFuture.actionGet();
+
+                LlmPromptTemplate template = null;
+                if (templateResponse.getHits().getTotalHits().value() > 0) {
+                    SearchHit hit = templateResponse.getHits().getHits()[0];
+                    template = LlmPromptTemplate.fromXContent(hit.getSourceAsMap());
+                }
+                if (template != null) {
+                    // Create hits JSON for template substitution
+                    String hitsJson;
+                    try (var builder = XContentFactory.jsonBuilder()) {
+                        builder.startArray();
+                        for (Map.Entry<String, String> hit : unprocessedUnionHits.entrySet()) {
+                            builder.startObject();
+                            builder.field("id", hit.getKey());
+                            builder.field("source", hit.getValue());
+                            builder.endObject();
+                        }
+                        builder.endArray();
+                        hitsJson = builder.toString();
+                    }
+
+                    // Create variables for template substitution
+                    Map<String, String> variables = TemplateUtils.createJudgmentVariables(queryText, referenceAnswer, hitsJson);
+
+                    // Substitute variables in template
+                    customPrompt = TemplateUtils.substituteVariables(template.getTemplate(), variables);
+                    LOGGER.info("Using custom prompt from template '{}': {}", template.getName(), customPrompt);
+                } else {
+                    LOGGER.warn("Template with ID '{}' not found, falling back to default prompt", templateId);
+                }
+            } catch (Exception e) {
+                LOGGER.error("Failed to retrieve or process template '{}', falling back to default prompt", templateId, e);
+                if (!ignoreFailure) {
+                    listener.onFailure(new SearchRelevanceException("Failed to process template", e, RestStatus.INTERNAL_SERVER_ERROR));
+                    return;
+                }
+            }
+        }
+
         mlAccessor.predict(
             modelId,
             tokenLimit,
@@ -306,6 +403,7 @@ public class LlmJudgmentsProcessor implements BaseJudgmentsProcessor {
             referenceAnswer,
             unprocessedUnionHits,
             ignoreFailure,
+            customPrompt,
             new ActionListener<ChunkResult>() {
                 @Override
                 public void onResponse(ChunkResult chunkResult) {
