@@ -7,17 +7,12 @@
  */
 package org.opensearch.searchrelevance.utils;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
-
 import java.util.Map;
 
-import org.junit.Test;
+import org.opensearch.test.OpenSearchTestCase;
 
-public class TemplateUtilsTest {
+public class TemplateUtilsTest extends OpenSearchTestCase {
 
-    @Test
     public void testSubstituteVariables_BasicSubstitution() {
         String template = "Search for {searchText} in {hits}";
         Map<String, String> variables = Map.of("searchText", "laptop", "hits", "[{\"id\":\"1\",\"title\":\"Gaming Laptop\"}]");
@@ -26,7 +21,6 @@ public class TemplateUtilsTest {
         assertEquals("Search for laptop in [{\"id\":\"1\",\"title\":\"Gaming Laptop\"}]", result);
     }
 
-    @Test
     public void testSubstituteVariables_WithReference() {
         String template = "Query: {searchText}\nReference: {reference}\nResults: {hits}";
         Map<String, String> variables = Map.of(
@@ -44,7 +38,6 @@ public class TemplateUtilsTest {
         assertEquals(expected, result);
     }
 
-    @Test
     public void testSubstituteVariables_MissingVariable() {
         String template = "Search for {searchText} with {missingVar}";
         Map<String, String> variables = Map.of("searchText", "laptop");
@@ -53,26 +46,22 @@ public class TemplateUtilsTest {
         assertEquals("Search for laptop with {missingVar}", result);
     }
 
-    @Test
     public void testSubstituteVariables_EmptyTemplate() {
         String result = TemplateUtils.substituteVariables("", Map.of("searchText", "test"));
         assertEquals("", result);
     }
 
-    @Test
     public void testSubstituteVariables_NullTemplate() {
         String result = TemplateUtils.substituteVariables(null, Map.of("searchText", "test"));
         assertEquals(null, result);
     }
 
-    @Test
     public void testSubstituteVariables_EmptyVariables() {
         String template = "Search for {searchText}";
         String result = TemplateUtils.substituteVariables(template, Map.of());
         assertEquals("Search for {searchText}", result);
     }
 
-    @Test
     public void testSubstituteVariables_SpecialCharacters() {
         String template = "Query: {searchText}";
         Map<String, String> variables = Map.of("searchText", "test$with\\special[chars]");
@@ -81,34 +70,28 @@ public class TemplateUtilsTest {
         assertEquals("Query: test$with\\special[chars]", result);
     }
 
-    @Test
     public void testValidateTemplate_ValidTemplate() {
         String template = "Search: {searchText}, Reference: {reference}, Hits: {hits}";
         assertTrue(TemplateUtils.validateTemplate(template));
     }
 
-    @Test
     public void testValidateTemplate_InvalidVariable() {
         String template = "Search: {searchText}, Invalid: {invalidVar}";
         assertFalse(TemplateUtils.validateTemplate(template));
     }
 
-    @Test
     public void testValidateTemplate_EmptyTemplate() {
         assertTrue(TemplateUtils.validateTemplate(""));
     }
 
-    @Test
     public void testValidateTemplate_NullTemplate() {
         assertTrue(TemplateUtils.validateTemplate(null));
     }
 
-    @Test
     public void testValidateTemplate_NoVariables() {
         assertTrue(TemplateUtils.validateTemplate("This is a plain template without variables"));
     }
 
-    @Test
     public void testIsSupportedVariable() {
         assertTrue(TemplateUtils.isSupportedVariable("searchText"));
         assertTrue(TemplateUtils.isSupportedVariable("reference"));
@@ -118,7 +101,6 @@ public class TemplateUtilsTest {
         assertFalse(TemplateUtils.isSupportedVariable(null));
     }
 
-    @Test
     public void testCreateJudgmentVariables() {
         String searchText = "best laptops";
         String reference = "gaming laptops";
@@ -131,7 +113,6 @@ public class TemplateUtilsTest {
         assertEquals(hits, variables.get("hits"));
     }
 
-    @Test
     public void testCreateJudgmentVariables_NullValues() {
         Map<String, String> variables = TemplateUtils.createJudgmentVariables(null, null, null);
 
@@ -140,7 +121,6 @@ public class TemplateUtilsTest {
         assertEquals("", variables.get("hits"));
     }
 
-    @Test
     public void testCreateJudgmentVariables_MixedNullValues() {
         String searchText = "test query";
         String hits = "[{\"id\":\"1\"}]";
@@ -152,7 +132,6 @@ public class TemplateUtilsTest {
         assertEquals(hits, variables.get("hits"));
     }
 
-    @Test
     public void testComplexTemplate() {
         String template = "You are an expert evaluator. "
             + "Rate the relevance of search results for query: '{searchText}'. "
