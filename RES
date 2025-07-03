@@ -1,0 +1,13 @@
+{
+  "error": {
+    "root_cause": [
+      {
+        "type": "status_exception",
+        "reason": "Failed to find connector"
+      }
+    ],
+    "type": "status_exception",
+    "reason": "Failed to find connector"
+  },
+  "status": 404
+}

@@ -11,7 +11,7 @@ import java.util.Map;
 
 import org.opensearch.test.OpenSearchTestCase;
 
-public class TemplateUtilsTest extends OpenSearchTestCase {
+public class TemplateUtilsTests extends OpenSearchTestCase {
 
     public void testSubstituteVariables_BasicSubstitution() {
         String template = "Search for {searchText} in {hits}";
