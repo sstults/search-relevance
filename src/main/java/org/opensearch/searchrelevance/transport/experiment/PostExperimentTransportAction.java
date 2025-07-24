@@ -92,7 +92,7 @@ public class PostExperimentTransportAction extends HandledTransportAction<PostEx
 
         try {
             String id = UUID.randomUUID().toString();
-            LOGGER.warn("Experiment ID: " + id);
+            LOGGER.info("Experiment ID: {}", id);
             Experiment initialExperiment = new Experiment(
                 id,
                 TimeUtils.getTimestamp(),
@@ -127,25 +127,28 @@ public class PostExperimentTransportAction extends HandledTransportAction<PostEx
 
     private void triggerAsyncProcessing(String experimentId, PostExperimentRequest request) {
         try {
-
-            List<SearchConfiguration> searchConfigurations = request.getSearchConfigurationList()
-                .stream()
-                .map(id -> searchConfigurationDao.getSearchConfigurationSync(id))
-                .collect(Collectors.toList());
-
-            if (searchConfigurations.size() != 1) {
-                throw new Exception("Must have exactly one search configuration. Had " + searchConfigurations.size() + " size.");
-            }
-            String searchConfigurationId = searchConfigurations.get(0).id();
-
-            if (request.getJudgmentList().size() != 1) {
-                throw new Exception("Must have exactly one judgment list. Had " + request.getJudgmentList().size() + " size.");
-            }
-
+            String searchConfigurationId = validateRequest(request);
             processExperiment(experimentId, request, searchConfigurationId);
         } catch (Exception e) {
             handleAsyncFailure(experimentId, request, "Failed to start async processing", e);
         }
+    }
+
+    private String validateRequest(PostExperimentRequest request) throws Exception {
+        List<SearchConfiguration> searchConfigurations = request.getSearchConfigurationList()
+            .stream()
+            .map(searchConfigurationDao::getSearchConfigurationSync)
+            .toList();
+
+        if (searchConfigurations.size() != 1) {
+            throw new Exception("Must have exactly one search configuration. Had " + searchConfigurations.size() + " size.");
+        }
+        String searchConfigurationId = searchConfigurations.getFirst().id();
+
+        if (request.getJudgmentList().size() != 1) {
+            throw new Exception("Must have exactly one judgment list. Had " + request.getJudgmentList().size() + " size.");
+        }
+        return searchConfigurationId;
     }
 
     private void processExperiment(String experimentId, PostExperimentRequest request, String searchConfigurationId) {

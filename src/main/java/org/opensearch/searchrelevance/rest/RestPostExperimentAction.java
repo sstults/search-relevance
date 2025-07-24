@@ -61,13 +61,22 @@ public class RestPostExperimentAction extends BaseRestHandler {
         Map<String, Object> source = parser.map();
 
         String querySetId = (String) source.get("querySetId");
+        if (querySetId == null || querySetId.isEmpty()) {
+            throw new IllegalArgumentException("querySetId missing");
+        }
+
         List<String> searchConfigurationList = ParserUtils.convertObjToList(source, "searchConfigurationList");
         Integer sizeObj = (Integer) source.get("size");
         int size = sizeObj != null ? sizeObj.intValue() : 10; // Default size to 10 if not provided
         List<String> judgmentList = ParserUtils.convertObjToList(source, "judgmentList");
 
         List<Map<String, Object>> evaluationResultList = ParserUtils.convertObjToListOfMaps(source, "evaluationResultList");
+
         String typeString = (String) source.get("type");
+        if (typeString == null || typeString.isEmpty()) {
+            throw new IllegalArgumentException("type missing");
+        }
+
         ExperimentType type;
         try {
             type = ExperimentType.valueOf(typeString);
