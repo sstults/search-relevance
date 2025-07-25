@@ -21,6 +21,7 @@ import java.util.Map;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.opensearch.ExceptionsHelper;
 import org.opensearch.action.index.IndexResponse;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.rest.RestStatus;
@@ -65,7 +66,7 @@ public class RestPutSearchConfigurationAction extends BaseRestHandler {
         Map<String, Object> source = parser.map();
 
         String name = (String) source.get(NAME);
-        TextValidationUtil.ValidationResult nameValidation = TextValidationUtil.validateText(name);
+        TextValidationUtil.ValidationResult nameValidation = TextValidationUtil.validateName(name);
         if (!nameValidation.isValid()) {
             return channel -> channel.sendResponse(
                 new BytesRestResponse(RestStatus.BAD_REQUEST, "Invalid name: " + nameValidation.getErrorMessage())
@@ -95,7 +96,7 @@ public class RestPutSearchConfigurationAction extends BaseRestHandler {
             @Override
             public void onFailure(Exception e) {
                 try {
-                    channel.sendResponse(new BytesRestResponse(channel, RestStatus.INTERNAL_SERVER_ERROR, e));
+                    channel.sendResponse(new BytesRestResponse(channel, ExceptionsHelper.status(e), e));
                 } catch (IOException ex) {
                     LOGGER.error("Failed to send error response", ex);
                 }

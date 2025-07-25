@@ -31,6 +31,7 @@ import java.util.Optional;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.opensearch.ExceptionsHelper;
 import org.opensearch.action.index.IndexResponse;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.rest.RestStatus;
@@ -81,7 +82,7 @@ public class RestPutJudgmentAction extends BaseRestHandler {
         Map<String, Object> source = parser.map();
 
         String name = (String) source.get(NAME);
-        TextValidationUtil.ValidationResult nameValidation = TextValidationUtil.validateText(name);
+        TextValidationUtil.ValidationResult nameValidation = TextValidationUtil.validateName(name);
         if (!nameValidation.isValid()) {
             return channel -> channel.sendResponse(
                 new BytesRestResponse(RestStatus.BAD_REQUEST, "Invalid name: " + nameValidation.getErrorMessage())
@@ -89,7 +90,7 @@ public class RestPutJudgmentAction extends BaseRestHandler {
         }
         String description = (String) source.get(DESCRIPTION);
         if (description != null) {
-            TextValidationUtil.ValidationResult descriptionValidation = TextValidationUtil.validateText(description);
+            TextValidationUtil.ValidationResult descriptionValidation = TextValidationUtil.validateDescription(description);
             if (!descriptionValidation.isValid()) {
                 return channel -> channel.sendResponse(
                     new BytesRestResponse(RestStatus.BAD_REQUEST, "Invalid description: " + descriptionValidation.getErrorMessage())
@@ -165,7 +166,7 @@ public class RestPutJudgmentAction extends BaseRestHandler {
             @Override
             public void onFailure(Exception e) {
                 try {
-                    channel.sendResponse(new BytesRestResponse(channel, RestStatus.INTERNAL_SERVER_ERROR, e));
+                    channel.sendResponse(new BytesRestResponse(channel, ExceptionsHelper.status(e), e));
                 } catch (IOException ex) {
                     LOGGER.error("Failed to send error response", ex);
                 }

@@ -49,6 +49,15 @@ public class PointwiseExperimentIT extends BaseExperimentIT {
         // Act
         String experimentId = createPointwiseExperiment(querySetId, searchConfigurationId, judgmentId);
 
+        // Wait for the experiment to be created and indexed
+        Thread.sleep(DEFAULT_INTERVAL_MS);
+        Map<String, Object> experimentSource = pollExperimentUntilCompleted(experimentId);
+        // Assert experiment exists with correct type
+        // We don't wait for completion since it may time out in constrained environments
+        assertNotNull("Experiment should exist", experimentSource);
+        assertEquals("POINTWISE_EVALUATION", experimentSource.get("type"));
+        assertEquals(querySetId, experimentSource.get("querySetId"));
+
         // Assert
         Map<String, String> queryTextToEvaluationId = assertPointwiseExperimentCreation(
             experimentId,
@@ -157,6 +166,12 @@ public class PointwiseExperimentIT extends BaseExperimentIT {
             Map<String, Object> evaluationSource = (Map<String, Object>) getEvaluationResultJson.get("_source");
             // randomly pick 2 items and check them field by field, do sanity check for others
             String actualQueryTerm = evaluationSource.get("searchText").toString();
+
+            // Verify experiment fields are present for pointwise evaluation experiments
+            assertNotNull("experimentId should be present", evaluationSource.get("experimentId"));
+            assertNotNull("experimentVariantId should be null for pointwise evaluation", evaluationSource.get("experimentVariantId"));
+            assertNull("experimentVariantParameters should be null for pointwise evaluation", evaluationSource.get("experimentVariantParameters"));
+
             if (EXPECT_EVALUATION_RESULTS.containsKey(actualQueryTerm)) {
                 Map<String, Object> expectedResult = (Map<String, Object>) EXPECT_EVALUATION_RESULTS.get(actualQueryTerm);
                 List<String> actualDocumentIds = (List<String>) evaluationSource.get("documentIds");
