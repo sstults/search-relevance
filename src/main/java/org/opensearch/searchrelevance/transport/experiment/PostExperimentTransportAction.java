@@ -12,14 +12,10 @@ import static org.opensearch.searchrelevance.common.MetricsConstants.POINTWISE_F
 import static org.opensearch.searchrelevance.common.MetricsConstants.POINTWISE_FIELD_NAME_SEARCH_CONFIGURATION_ID;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Collectors;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -40,7 +36,6 @@ import org.opensearch.searchrelevance.metrics.MetricsHelper;
 import org.opensearch.searchrelevance.model.AsyncStatus;
 import org.opensearch.searchrelevance.model.EvaluationResult;
 import org.opensearch.searchrelevance.model.Experiment;
-import org.opensearch.searchrelevance.model.ExperimentType;
 import org.opensearch.searchrelevance.model.SearchConfiguration;
 import org.opensearch.searchrelevance.utils.TimeUtils;
 import org.opensearch.tasks.Task;
@@ -91,49 +86,49 @@ public class PostExperimentTransportAction extends HandledTransportAction<PostEx
         }
 
         try {
-            String id = UUID.randomUUID().toString();
-            LOGGER.info("Experiment ID: {}", id);
-            Experiment initialExperiment = new Experiment(
-                id,
+            // Validate input (synchronously)
+            validateRequest(request);
+
+            // Create experiment as COMPLETED (data already processed)
+            String experimentId = UUID.randomUUID().toString();
+            LOGGER.info("Creating experiment with ID: {}", experimentId);
+            List<Map<String, Object>> results = new ArrayList<>();
+
+            // Persist evaluation results (synchronously)
+            for (Map<String, Object> evalData : request.getEvaluationResultList()) {
+                EvaluationResult result = createEvaluationResult(evalData, request);
+                evaluationResultDao.putEvaluationResultSync(result);
+                results.add(createResultSummary(result));
+            }
+
+            // Create final experiment with COMPLETED status
+            Experiment experiment = new Experiment(
+                experimentId,
                 TimeUtils.getTimestamp(),
                 request.getType(),
-                AsyncStatus.PROCESSING,
+                AsyncStatus.COMPLETED, // Already complete!
                 request.getQuerySetId(),
                 request.getSearchConfigurationList(),
                 request.getJudgmentList(),
                 request.getSize(),
-                new ArrayList<>()
+                results
             );
 
-            // Store initial experiment and return ID immediately
-            experimentDao.putExperiment(initialExperiment, ActionListener.wrap(response -> {
-                // Return response immediately
-                listener.onResponse((IndexResponse) response);
-
-                // Start async processing
-                triggerAsyncProcessing(id, request);
-            }, e -> {
-                LOGGER.error("Failed to create initial experiment", e);
-                listener.onFailure(
-                    new SearchRelevanceException("Failed to create initial experiment", e, RestStatus.INTERNAL_SERVER_ERROR)
-                );
-            }));
+            // Persist and return
+            experimentDao.putExperiment(experiment, listener);
 
         } catch (Exception e) {
-            LOGGER.error("Failed to process experiment request", e);
-            listener.onFailure(new SearchRelevanceException("Failed to process experiment request", e, RestStatus.INTERNAL_SERVER_ERROR));
+            LOGGER.error("Failed to import experiment", e);
+            listener.onFailure(new SearchRelevanceException("Import failed", e, RestStatus.BAD_REQUEST));
         }
     }
 
-    private void triggerAsyncProcessing(String experimentId, PostExperimentRequest request) {
-        try {
-            String searchConfigurationId = validateRequest(request);
-            processExperiment(experimentId, request, searchConfigurationId);
-        } catch (Exception e) {
-            handleAsyncFailure(experimentId, request, "Failed to start async processing", e);
-        }
-    }
-
+    /**
+     * Validates the request and returns the search configuration ID
+     * @param request - the request to validate
+     * @return search configuration ID
+     * @throws Exception if validation fails
+     */
     private String validateRequest(PostExperimentRequest request) throws Exception {
         List<SearchConfiguration> searchConfigurations = request.getSearchConfigurationList()
             .stream()
@@ -151,143 +146,42 @@ public class PostExperimentTransportAction extends HandledTransportAction<PostEx
         return searchConfigurationId;
     }
 
-    private void processExperiment(String experimentId, PostExperimentRequest request, String searchConfigurationId) {
-        List<Map<String, Object>> finalResults = Collections.synchronizedList(new ArrayList<>());
-        AtomicInteger pendingQueries = new AtomicInteger(request.getEvaluationResultList().size());
-        AtomicBoolean hasFailure = new AtomicBoolean(false);
+    /**
+     * Creates an EvaluationResult from evaluation data and request
+     * @param evalData - evaluation data map
+     * @param request - the original request
+     * @return EvaluationResult object
+     */
+    private EvaluationResult createEvaluationResult(Map<String, Object> evalData, PostExperimentRequest request) {
+        String evaluationId = UUID.randomUUID().toString();
+        String searchConfigurationId = request.getSearchConfigurationList().get(0); // Already validated to have exactly one
+        String queryText = (String) evalData.get("searchText");
+        List<String> judgmentList = request.getJudgmentList();
+        List<String> documentIds = (List<String>) evalData.get("documentIds");
+        List<Map<String, Object>> metrics = (List<Map<String, Object>>) evalData.get("metrics");
 
-        importExperiment(experimentId, request, searchConfigurationId, finalResults, pendingQueries, hasFailure);
-    }
-
-    private void importExperiment(
-        String experimentId,
-        PostExperimentRequest request,
-        String searchConfigurationId,
-        List<Map<String, Object>> finalResults,
-        AtomicInteger pendingQueries,
-        AtomicBoolean hasFailure
-    ) {
-        if (request.getType() == ExperimentType.POINTWISE_EVALUATION) {
-
-            List judgmentList = request.getJudgmentList();
-            for (Map<String, Object> evalResultMap : request.getEvaluationResultList()) {
-                final String evaluationId = UUID.randomUUID().toString();
-
-                String queryText = (String) evalResultMap.get("searchText");
-                List metrics = (List) evalResultMap.get("metrics");
-                List documentIds = (List) evalResultMap.get("documentIds");
-
-                EvaluationResult evaluationResult = new EvaluationResult(
-                    evaluationId,
-                    TimeUtils.getTimestamp(),
-                    searchConfigurationId,
-                    queryText,
-                    judgmentList,
-                    documentIds,
-                    metrics
-                );
-
-                evaluationResultDao.putEvaluationResult(evaluationResult, ActionListener.wrap(success -> {
-                    Map<String, Object> evalResults = Collections.synchronizedMap(new HashMap<>());
-                    evalResults.put(POINTWISE_FIELD_NAME_SEARCH_CONFIGURATION_ID, searchConfigurationId);
-                    evalResults.put(POINTWISE_FIELD_NAME_EVALUATION_ID, evaluationId);
-                    evalResults.put(PAIRWISE_FIELD_NAME_QUERY_TEXT, queryText);
-                    finalResults.add(evalResults);
-
-                    if (pendingQueries.decrementAndGet() == 0) {
-                        updateFinalExperiment(experimentId, request, finalResults, judgmentList);
-                    }
-                }, error -> {
-                    hasFailure.set(true);
-                    handleFailure(error, hasFailure, experimentId, request);
-                }));
-            }
-        } else {
-            throw new SearchRelevanceException(
-                "Importing experimentType" + request.getType() + " is not supported",
-                RestStatus.BAD_REQUEST
-            );
-        }
-    }
-
-    private void handleFailure(Exception error, AtomicBoolean hasFailure, String experimentId, PostExperimentRequest request) {
-        if (hasFailure.compareAndSet(false, true)) {
-            handleAsyncFailure(experimentId, request, "Failed to process metrics", error);
-        }
-    }
-
-    private void handleAsyncFailure(String experimentId, PutExperimentRequest request, String message, Exception error) {
-        LOGGER.error(message + " for experiment: " + experimentId, error);
-
-        Experiment errorExperiment = new Experiment(
-            experimentId,
+        return new EvaluationResult(
+            evaluationId,
             TimeUtils.getTimestamp(),
-            request.getType(),
-            AsyncStatus.ERROR,
-            request.getQuerySetId(),
-            request.getSearchConfigurationList(),
-            request.getJudgmentList(),
-            request.getSize(),
-            List.of(Map.of("error", error.getMessage()))
-        );
-
-        experimentDao.updateExperiment(
-            errorExperiment,
-            ActionListener.wrap(
-                response -> LOGGER.info("Updated experiment {} status to ERROR", experimentId),
-                e -> LOGGER.error("Failed to update error status for experiment: " + experimentId, e)
-            )
-        );
-    }
-
-    private void updateFinalExperiment(
-        String experimentId,
-        PostExperimentRequest request,
-        List<Map<String, Object>> finalResults,
-        List<String> judgmentList
-    ) {
-        Experiment finalExperiment = new Experiment(
-            experimentId,
-            TimeUtils.getTimestamp(),
-            request.getType(),
-            AsyncStatus.COMPLETED,
-            request.getQuerySetId(),
-            request.getSearchConfigurationList(),
+            searchConfigurationId,
+            queryText,
             judgmentList,
-            request.getSize(),
-            finalResults
-        );
-
-        experimentDao.updateExperiment(
-            finalExperiment,
-            ActionListener.wrap(
-                response -> LOGGER.debug("Updated final experiment: {}", experimentId),
-                error -> handleAsyncFailure(experimentId, request, "Failed to update final experiment", error)
-            )
+            documentIds,
+            metrics
         );
     }
 
-    private void handleAsyncFailure(String experimentId, PostExperimentRequest request, String message, Exception error) {
-        LOGGER.error(message + " for experiment: " + experimentId, error);
-
-        Experiment errorExperiment = new Experiment(
-            experimentId,
-            TimeUtils.getTimestamp(),
-            request.getType(),
-            AsyncStatus.ERROR,
-            request.getQuerySetId(),
-            request.getSearchConfigurationList(),
-            request.getJudgmentList(),
-            request.getSize(),
-            List.of(Map.of("error", error.getMessage()))
-        );
-
-        experimentDao.updateExperiment(
-            errorExperiment,
-            ActionListener.wrap(
-                response -> LOGGER.info("Updated experiment {} status to ERROR", experimentId),
-                e -> LOGGER.error("Failed to update error status for experiment: " + experimentId, e)
-            )
-        );
+    /**
+     * Creates a result summary map for the experiment results
+     * @param result - the evaluation result
+     * @return summary map
+     */
+    private Map<String, Object> createResultSummary(EvaluationResult result) {
+        Map<String, Object> summary = new HashMap<>();
+        summary.put(POINTWISE_FIELD_NAME_SEARCH_CONFIGURATION_ID, result.searchConfigurationId());
+        summary.put(POINTWISE_FIELD_NAME_EVALUATION_ID, result.id());
+        summary.put(PAIRWISE_FIELD_NAME_QUERY_TEXT, result.searchText());
+        return summary;
     }
+
 }
