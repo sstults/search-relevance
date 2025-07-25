@@ -117,6 +117,30 @@ public class SearchRelevanceIndicesManager {
     }
 
     /**
+     * Put a doc to the system index synchronously
+     * @param docId - document id need to be executed
+     * @param xContentBuilder - content need to be executed
+     * @param index - system index
+     * @return IndexResponse - response from the index operation
+     */
+    public IndexResponse putDocSync(final String docId, final XContentBuilder xContentBuilder, final SearchRelevanceIndices index) {
+        createIndexIfAbsentSync(index);
+        return StashedThreadContext.run(client, () -> {
+            try {
+                return client.prepareIndex(index.getIndexName())
+                    .setId(docId)
+                    .setOpType(OpType.CREATE)
+                    .setRefreshPolicy(WriteRequest.RefreshPolicy.IMMEDIATE)
+                    .setSource(xContentBuilder)
+                    .execute()
+                    .actionGet();
+            } catch (Exception e) {
+                throw new SearchRelevanceException("Failed to store doc", e, RestStatus.INTERNAL_SERVER_ERROR);
+            }
+        });
+    }
+
+    /**
      * Put a doc to the system index
      * @param docId - document id need to be executed
      * @param xContentBuilder - content need to be executed

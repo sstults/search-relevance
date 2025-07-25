@@ -15,6 +15,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.opensearch.action.StepListener;
 import org.opensearch.action.delete.DeleteResponse;
+import org.opensearch.action.index.IndexResponse;
 import org.opensearch.action.search.SearchResponse;
 import org.opensearch.common.xcontent.XContentFactory;
 import org.opensearch.core.action.ActionListener;
@@ -84,6 +85,26 @@ public class EvaluationResultDao {
             return null;
         }
         return searchRelevanceIndicesManager.getDocByDocId(evaluationResultId, EVALUATION_RESULT, listener);
+    }
+
+    /**
+     * Stores evaluation result synchronously in the system index
+     * @param evaluationResult - EvaluationResult content to be stored
+     * @return IndexResponse - response from the index operation
+     */
+    public IndexResponse putEvaluationResultSync(final EvaluationResult evaluationResult) {
+        if (evaluationResult == null) {
+            throw new SearchRelevanceException("EvaluationResult cannot be null", RestStatus.BAD_REQUEST);
+        }
+        try {
+            return searchRelevanceIndicesManager.putDocSync(
+                evaluationResult.id(),
+                evaluationResult.toXContent(XContentFactory.jsonBuilder(), ToXContent.EMPTY_PARAMS),
+                EVALUATION_RESULT
+            );
+        } catch (IOException e) {
+            throw new SearchRelevanceException("Failed to store evaluationResult", e, RestStatus.INTERNAL_SERVER_ERROR);
+        }
     }
 
     /**
