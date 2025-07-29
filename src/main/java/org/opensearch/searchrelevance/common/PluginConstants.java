@@ -51,6 +51,12 @@ public class PluginConstants {
     public static final String JUDGMENT_CACHE_INDEX_MAPPING = "mappings/judgment_cache.json";
     public static final String EXPERIMENT_VARIANT_INDEX = "search-relevance-experiment-variant";
     public static final String EXPERIMENT_VARIANT_INDEX_MAPPING = "mappings/experiment_variant.json";
+    public static final String REMOTE_SEARCH_CONFIG_INDEX = "search-relevance-remote-search-config";
+    public static final String REMOTE_SEARCH_CONFIG_INDEX_MAPPING = "mappings/remote_search_configuration.json";
+    public static final String REMOTE_SEARCH_CACHE_INDEX = "search-relevance-remote-search-cache";
+    public static final String REMOTE_SEARCH_CACHE_INDEX_MAPPING = "mappings/remote_search_cache.json";
+    public static final String REMOTE_SEARCH_FAILURE_INDEX = "search-relevance-remote-search-failure";
+    public static final String REMOTE_SEARCH_FAILURE_INDEX_MAPPING = "mappings/remote_search_failure.json";
 
     /**
      * UBI
