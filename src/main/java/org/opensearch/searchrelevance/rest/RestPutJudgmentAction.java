@@ -14,6 +14,7 @@ import static org.opensearch.searchrelevance.common.MetricsConstants.MODEL_ID;
 import static org.opensearch.searchrelevance.common.PluginConstants.CLICK_MODEL;
 import static org.opensearch.searchrelevance.common.PluginConstants.CONTEXT_FIELDS;
 import static org.opensearch.searchrelevance.common.PluginConstants.DESCRIPTION;
+import static org.opensearch.searchrelevance.common.PluginConstants.END_DATE;
 import static org.opensearch.searchrelevance.common.PluginConstants.IGNORE_FAILURE;
 import static org.opensearch.searchrelevance.common.PluginConstants.JUDGMENTS_URL;
 import static org.opensearch.searchrelevance.common.PluginConstants.JUDGMENT_RATINGS;
@@ -22,6 +23,7 @@ import static org.opensearch.searchrelevance.common.PluginConstants.NAX_RANK;
 import static org.opensearch.searchrelevance.common.PluginConstants.QUERYSET_ID;
 import static org.opensearch.searchrelevance.common.PluginConstants.SEARCH_CONFIGURATION_LIST;
 import static org.opensearch.searchrelevance.common.PluginConstants.SIZE;
+import static org.opensearch.searchrelevance.common.PluginConstants.START_DATE;
 import static org.opensearch.searchrelevance.common.PluginConstants.TYPE;
 
 import java.io.IOException;
@@ -48,6 +50,8 @@ import org.opensearch.searchrelevance.transport.judgment.PutJudgmentAction;
 import org.opensearch.searchrelevance.transport.judgment.PutJudgmentRequest;
 import org.opensearch.searchrelevance.transport.judgment.PutLlmJudgmentRequest;
 import org.opensearch.searchrelevance.transport.judgment.PutUbiJudgmentRequest;
+import org.opensearch.searchrelevance.utils.DateValidationUtil;
+import org.opensearch.searchrelevance.utils.DateValidationUtil.DateValidationResult;
 import org.opensearch.searchrelevance.utils.ParserUtils;
 import org.opensearch.searchrelevance.utils.TextValidationUtil;
 import org.opensearch.transport.client.node.NodeClient;
@@ -138,7 +142,26 @@ public class RestPutJudgmentAction extends BaseRestHandler {
             case UBI_JUDGMENT -> {
                 String clickModel = (String) source.get(CLICK_MODEL);
                 int maxRank = (int) source.get(NAX_RANK);
-                createRequest = new PutUbiJudgmentRequest(type, name, description, clickModel, maxRank);
+
+                String startDate = (String) source.getOrDefault(START_DATE, "");
+                String endDate = (String) source.getOrDefault(END_DATE, "");
+
+                DateValidationResult validStart = DateValidationUtil.validateDate(startDate);
+                DateValidationResult validEnd = DateValidationUtil.validateDate(endDate);
+
+                if ((validStart.isValid() == false)) {
+                    return channel -> channel.sendResponse(
+                        new BytesRestResponse(RestStatus.BAD_REQUEST, "Invalid start date format: " + validStart.getErrorMessage())
+                    );
+                }
+
+                if ((validEnd.isValid() == false)) {
+                    return channel -> channel.sendResponse(
+                        new BytesRestResponse(RestStatus.BAD_REQUEST, "Invalid end date format: " + validEnd.getErrorMessage())
+                    );
+                }
+
+                createRequest = new PutUbiJudgmentRequest(type, name, description, clickModel, maxRank, startDate, endDate);
             }
             case IMPORT_JUDGMENT -> {
                 List<Map<String, Object>> judgmentRatings = (List<Map<String, Object>>) source.get(JUDGMENT_RATINGS);
