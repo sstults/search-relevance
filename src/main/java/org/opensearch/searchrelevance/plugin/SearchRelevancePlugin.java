@@ -48,6 +48,9 @@ import org.opensearch.searchrelevance.dao.ExperimentVariantDao;
 import org.opensearch.searchrelevance.dao.JudgmentCacheDao;
 import org.opensearch.searchrelevance.dao.JudgmentDao;
 import org.opensearch.searchrelevance.dao.QuerySetDao;
+import org.opensearch.searchrelevance.dao.RemoteSearchCacheDao;
+import org.opensearch.searchrelevance.dao.RemoteSearchConfigurationDao;
+import org.opensearch.searchrelevance.dao.RemoteSearchFailureDao;
 import org.opensearch.searchrelevance.dao.SearchConfigurationDao;
 import org.opensearch.searchrelevance.executors.ExperimentTaskManager;
 import org.opensearch.searchrelevance.executors.SearchRelevanceExecutor;
@@ -120,6 +123,9 @@ public class SearchRelevancePlugin extends Plugin implements ActionPlugin, Syste
     private JudgmentDao judgmentDao;
     private EvaluationResultDao evaluationResultDao;
     private JudgmentCacheDao judgmentCacheDao;
+    private RemoteSearchConfigurationDao remoteSearchConfigurationDao;
+    private RemoteSearchCacheDao remoteSearchCacheDao;
+    private RemoteSearchFailureDao remoteSearchFailureDao;
     private MLAccessor mlAccessor;
     private MetricsHelper metricsHelper;
     private SearchRelevanceSettingsAccessor settingsAccessor;
@@ -158,6 +164,9 @@ public class SearchRelevancePlugin extends Plugin implements ActionPlugin, Syste
         this.judgmentDao = new JudgmentDao(searchRelevanceIndicesManager);
         this.evaluationResultDao = new EvaluationResultDao(searchRelevanceIndicesManager);
         this.judgmentCacheDao = new JudgmentCacheDao(searchRelevanceIndicesManager);
+        this.remoteSearchConfigurationDao = new RemoteSearchConfigurationDao(client);
+        this.remoteSearchCacheDao = new RemoteSearchCacheDao(client);
+        this.remoteSearchFailureDao = new RemoteSearchFailureDao(client);
         MachineLearningNodeClient mlClient = new MachineLearningNodeClient(client);
         this.mlAccessor = new MLAccessor(mlClient);
         SearchRelevanceExecutor.initialize(threadPool);
@@ -165,7 +174,10 @@ public class SearchRelevancePlugin extends Plugin implements ActionPlugin, Syste
             client,
             evaluationResultDao,
             experimentVariantDao,
-            threadPool
+            threadPool,
+            remoteSearchConfigurationDao,
+            remoteSearchCacheDao,
+            remoteSearchFailureDao
         );
         this.metricsHelper = new MetricsHelper(clusterService, client, judgmentDao, evaluationResultDao, experimentVariantDao);
         this.settingsAccessor = new SearchRelevanceSettingsAccessor(clusterService, environment.settings());

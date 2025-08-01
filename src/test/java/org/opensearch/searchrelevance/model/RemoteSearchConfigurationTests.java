@@ -14,16 +14,14 @@ import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 
-import org.junit.Test;
 import org.opensearch.common.xcontent.XContentType;
 import org.opensearch.core.xcontent.XContentBuilder;
 
 /**
  * Tests for RemoteSearchConfiguration model
  */
-public class RemoteSearchConfigurationTests {
+public class RemoteSearchConfigurationTests extends org.apache.lucene.tests.util.LuceneTestCase {
 
-    @Test
     public void testRemoteSearchConfigurationCreation() {
         Map<String, Object> metadata = new HashMap<>();
         metadata.put("environment", "test");
@@ -61,7 +59,6 @@ public class RemoteSearchConfigurationTests {
         assertEquals("2025-01-29T10:00:00Z", config.getTimestamp());
     }
 
-    @Test
     public void testRemoteSearchConfigurationToXContent() throws IOException {
         Map<String, Object> metadata = new HashMap<>();
         metadata.put("environment", "test");
@@ -97,7 +94,6 @@ public class RemoteSearchConfigurationTests {
         assert (jsonString.contains("%SearchText%"));
     }
 
-    @Test
     public void testRemoteSearchConfigurationDefaults() {
         RemoteSearchConfiguration config = new RemoteSearchConfiguration(
             "test-config-2",
@@ -132,7 +128,6 @@ public class RemoteSearchConfigurationTests {
         assertEquals(null, config.getTimestamp());
     }
 
-    @Test
     public void testRemoteSearchConfigurationConstants() {
         assertEquals(10, RemoteSearchConfiguration.DEFAULT_MAX_REQUESTS_PER_SECOND);
         assertEquals(5, RemoteSearchConfiguration.DEFAULT_MAX_CONCURRENT_REQUESTS);

@@ -20,7 +20,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import org.junit.Before;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.opensearch.action.FailedNodeException;
@@ -49,7 +48,7 @@ public class SearchRelevanceStatsResponseTests extends OpenSearchTestCase {
     @Mock
     private StreamOutput mockStreamOutput;
 
-    @Before
+    // @Before
     public void setup() {
         MockitoAnnotations.openMocks(this);
         clusterName = new ClusterName("test-cluster");

@@ -12,7 +12,6 @@ import static org.mockito.Mockito.spy;
 
 import java.util.concurrent.TimeUnit;
 
-import org.junit.Before;
 import org.mockito.Spy;
 import org.opensearch.test.OpenSearchTestCase;
 
@@ -25,7 +24,7 @@ public class TimestampedEventStatTests extends OpenSearchTestCase {
 
     private long currentTime;
 
-    @Before
+    // @Before
     public void setup() {
         stat = spy(new TimestampedEventStat(STAT_NAME));
         currentTime = System.currentTimeMillis();

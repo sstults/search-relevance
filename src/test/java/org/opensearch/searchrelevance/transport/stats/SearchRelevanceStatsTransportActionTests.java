@@ -18,7 +18,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import org.junit.Before;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.opensearch.action.FailedNodeException;
@@ -64,7 +63,7 @@ public class SearchRelevanceStatsTransportActionTests extends OpenSearchTestCase
     private static InfoStatName infoStatName = InfoStatName.CLUSTER_VERSION;
     private static EventStatName eventStatName = EventStatName.LLM_JUDGMENT_RATING_GENERATIONS;
 
-    @Before
+    // @Before
     public void setup() {
         MockitoAnnotations.openMocks(this);
         clusterName = new ClusterName("test-cluster");

@@ -18,13 +18,21 @@ import org.opensearch.core.xcontent.XContentBuilder;
  */
 public class RemoteSearchCache implements ToXContentObject {
     public static final String CACHE_KEY = "cacheKey";
+    public static final String ID_FIELD = "cacheKey"; // Alias for DAO compatibility
     public static final String REMOTE_CONFIG_ID = "remoteConfigId";
+    public static final String CONFIGURATION_ID_FIELD = "remoteConfigId"; // Alias for DAO compatibility
     public static final String QUERY = "query";
+    public static final String QUERY_HASH_FIELD = "query"; // Alias for DAO compatibility
     public static final String QUERY_TEXT = "queryText";
+    public static final String QUERY_TEXT_FIELD = "queryText"; // Alias for DAO compatibility
     public static final String CACHED_RESPONSE = "cachedResponse";
+    public static final String RAW_RESPONSE_FIELD = "cachedResponse"; // Alias for DAO compatibility
     public static final String MAPPED_RESPONSE = "mappedResponse";
+    public static final String MAPPED_RESPONSE_FIELD = "mappedResponse"; // Alias for DAO compatibility
     public static final String CACHE_TIMESTAMP = "cacheTimestamp";
+    public static final String TIMESTAMP_FIELD = "cacheTimestamp"; // Alias for DAO compatibility
     public static final String EXPIRATION_TIMESTAMP = "expirationTimestamp";
+    public static final String TTL_MINUTES_FIELD = "ttlMinutes"; // Alias for DAO compatibility
 
     private final String cacheKey;
     private final String remoteConfigId;
@@ -92,6 +100,13 @@ public class RemoteSearchCache implements ToXContentObject {
         return remoteConfigId;
     }
 
+    /**
+     * Get configuration ID for DAO compatibility (returns remote config ID)
+     */
+    public String getConfigurationId() {
+        return remoteConfigId;
+    }
+
     public String getQuery() {
         return query;
     }
@@ -114,5 +129,35 @@ public class RemoteSearchCache implements ToXContentObject {
 
     public long getExpirationTimestamp() {
         return expirationTimestamp;
+    }
+
+    /**
+     * Get ID for DAO compatibility (returns cache key)
+     */
+    public String getId() {
+        return cacheKey;
+    }
+
+    /**
+     * Get response for DAO compatibility (returns cached response)
+     */
+    public String getResponse() {
+        return cachedResponse;
+    }
+
+    /**
+     * Create RemoteSearchCache from source map for DAO operations
+     */
+    public static RemoteSearchCache fromSourceMap(java.util.Map<String, Object> sourceMap) {
+        return new RemoteSearchCache(
+            (String) sourceMap.get(CACHE_KEY),
+            (String) sourceMap.get(REMOTE_CONFIG_ID),
+            (String) sourceMap.get(QUERY),
+            (String) sourceMap.get(QUERY_TEXT),
+            (String) sourceMap.get(CACHED_RESPONSE),
+            (String) sourceMap.get(MAPPED_RESPONSE),
+            sourceMap.get(CACHE_TIMESTAMP) != null ? ((Number) sourceMap.get(CACHE_TIMESTAMP)).longValue() : 0L,
+            sourceMap.get(EXPIRATION_TIMESTAMP) != null ? ((Number) sourceMap.get(EXPIRATION_TIMESTAMP)).longValue() : 0L
+        );
     }
 }

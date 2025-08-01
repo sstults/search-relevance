@@ -30,6 +30,9 @@ import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.common.breaker.CircuitBreakingException;
 import org.opensearch.searchrelevance.dao.EvaluationResultDao;
 import org.opensearch.searchrelevance.dao.ExperimentVariantDao;
+import org.opensearch.searchrelevance.dao.RemoteSearchCacheDao;
+import org.opensearch.searchrelevance.dao.RemoteSearchConfigurationDao;
+import org.opensearch.searchrelevance.dao.RemoteSearchFailureDao;
 import org.opensearch.searchrelevance.experiment.QuerySourceUtil;
 import org.opensearch.searchrelevance.model.ExperimentType;
 import org.opensearch.searchrelevance.model.ExperimentVariant;
@@ -67,19 +70,32 @@ public class ExperimentTaskManager {
     private final ExperimentVariantDao experimentVariantDao;
     private final ThreadPool threadPool;
     private final SearchResponseProcessor searchResponseProcessor;
+    private final RemoteSearchExecutor remoteSearchExecutor;
 
     @Inject
     public ExperimentTaskManager(
         Client client,
         EvaluationResultDao evaluationResultDao,
         ExperimentVariantDao experimentVariantDao,
-        ThreadPool threadPool
+        ThreadPool threadPool,
+        RemoteSearchConfigurationDao remoteSearchConfigurationDao,
+        RemoteSearchCacheDao remoteSearchCacheDao,
+        RemoteSearchFailureDao remoteSearchFailureDao
     ) {
         this.client = client;
         this.evaluationResultDao = evaluationResultDao;
         this.experimentVariantDao = experimentVariantDao;
         this.threadPool = threadPool;
         this.searchResponseProcessor = new SearchResponseProcessor(evaluationResultDao, experimentVariantDao);
+
+        // Initialize RemoteSearchExecutor with dependencies
+        RemoteResponseMapper remoteResponseMapper = new RemoteResponseMapper();
+        this.remoteSearchExecutor = new RemoteSearchExecutor(
+            remoteSearchConfigurationDao,
+            remoteSearchCacheDao,
+            remoteSearchFailureDao,
+            remoteResponseMapper
+        );
 
         this.maxConcurrentTasks = Math.max(2, Math.min(DEFAULT_MIN_CONCURRENT_THREADS, ALLOCATED_PROCESSORS / PROCESSOR_NUMBER_DIVISOR));
         this.concurrencyControl = new Semaphore(maxConcurrentTasks, true);
@@ -195,6 +211,20 @@ public class ExperimentTaskManager {
                 .taskContext(taskContext)
                 .searchPipeline(getSearchPipelineFromVariant(variant))
                 .build();
+        } else if (experimentType == ExperimentType.REMOTE_SEARCH_EVALUATION) {
+            return RemoteSearchTaskParameters.builder()
+                .experimentId(experimentId)
+                .searchConfigId(searchConfigId)
+                .index(index)
+                .query(query)
+                .queryText(queryText)
+                .size(size)
+                .experimentVariant(variant)
+                .judgmentIds(judgmentIds)
+                .docIdToScores(docIdToScores)
+                .taskContext(taskContext)
+                .remoteConfigId(getRemoteConfigIdFromVariant(variant))
+                .build();
         } else {
             // Default to hybrid optimizer parameters
             return VariantTaskParameters.builder()
@@ -217,6 +247,13 @@ public class ExperimentTaskManager {
      */
     private String getSearchPipelineFromVariant(ExperimentVariant variant) {
         return (String) variant.getParameters().get("searchPipeline");
+    }
+
+    /**
+     * Extract remote configuration ID from variant parameters for remote search experiments
+     */
+    private String getRemoteConfigIdFromVariant(ExperimentVariant variant) {
+        return (String) variant.getParameters().get("remoteConfigId");
     }
 
     /**
@@ -283,6 +320,19 @@ public class ExperimentTaskManager {
         }
 
         final String evaluationId = UUID.randomUUID().toString();
+
+        // Handle remote search experiments differently
+        if (params instanceof RemoteSearchTaskParameters) {
+            executeRemoteSearchVariantAsync((RemoteSearchTaskParameters) params, evaluationId, future);
+        } else {
+            executeLocalSearchVariantAsync(params, evaluationId, future);
+        }
+    }
+
+    /**
+     * Execute local search variant (existing functionality)
+     */
+    private void executeLocalSearchVariantAsync(VariantTaskParameters params, String evaluationId, CompletableFuture<Void> future) {
         SearchRequest searchRequest = buildSearchRequest(params, evaluationId);
 
         // Convert ActionListener to CompletableFuture
@@ -335,6 +385,87 @@ public class ExperimentTaskManager {
                 future.complete(null);
             }
         });
+    }
+
+    /**
+     * Execute remote search variant using RemoteSearchExecutor
+     */
+    private void executeRemoteSearchVariantAsync(RemoteSearchTaskParameters params, String evaluationId, CompletableFuture<Void> future) {
+        // Execute remote search request
+        remoteSearchExecutor.executeRemoteSearch(
+            params.getRemoteConfigId(),
+            params.getQuery(),
+            params.getQueryText(),
+            params.getExperimentId(),
+            new ActionListener<RemoteSearchExecutor.RemoteSearchResponse>() {
+                @Override
+                public void onResponse(RemoteSearchExecutor.RemoteSearchResponse remoteResponse) {
+                    try {
+                        // Process the remote search response using the search response processor
+                        // Convert remote response to OpenSearch SearchResponse format for processing
+                        processRemoteSearchResponse(remoteResponse, params, evaluationId);
+                        future.complete(null);
+                    } catch (Exception e) {
+                        future.completeExceptionally(e);
+                    } finally {
+                        concurrencyControl.release();
+                        activeTasks.decrement();
+                    }
+                }
+
+                @Override
+                public void onFailure(Exception e) {
+                    try {
+                        handleSearchFailure(
+                            e,
+                            params.getExperimentVariant(),
+                            params.getExperimentId(),
+                            evaluationId,
+                            params.getTaskContext()
+                        );
+                        future.complete(null);
+                    } catch (Exception ex) {
+                        future.completeExceptionally(ex);
+                    } finally {
+                        concurrencyControl.release();
+                        activeTasks.decrement();
+                    }
+                }
+            }
+        );
+    }
+
+    /**
+     * Process remote search response and integrate with evaluation metrics
+     */
+    private void processRemoteSearchResponse(
+        RemoteSearchExecutor.RemoteSearchResponse remoteResponse,
+        RemoteSearchTaskParameters params,
+        String evaluationId
+    ) {
+        // For now, we'll create a simplified processing approach
+        // In a full implementation, this would convert the remote response to OpenSearch format
+        // and use the existing searchResponseProcessor
+
+        log.info(
+            "Processing remote search response for experiment: {}, variant: {}, evaluation: {}",
+            params.getExperimentId(),
+            params.getExperimentVariant().getId(),
+            evaluationId
+        );
+
+        // TODO: Implement full remote response processing
+        // This would involve:
+        // 1. Parsing the mapped response from remoteResponse.getMappedResponse()
+        // 2. Converting it to OpenSearch SearchResponse format
+        // 3. Using searchResponseProcessor.processSearchResponse() for evaluation
+
+        // For now, we'll just log the successful execution
+        log.debug(
+            "Remote search completed successfully for config: {}, status: {}",
+            params.getRemoteConfigId(),
+            remoteResponse.getStatusCode()
+        );
     }
 
     /**

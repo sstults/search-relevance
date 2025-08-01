@@ -8,6 +8,7 @@
 package org.opensearch.searchrelevance.model;
 
 import java.io.IOException;
+import java.util.Locale;
 
 import org.opensearch.core.xcontent.ToXContentObject;
 import org.opensearch.core.xcontent.XContentBuilder;
@@ -18,14 +19,27 @@ import org.opensearch.core.xcontent.XContentBuilder;
  */
 public class RemoteSearchFailure implements ToXContentObject {
     public static final String ID = "id";
+    public static final String ID_FIELD = "id"; // Alias for DAO compatibility
     public static final String REMOTE_CONFIG_ID = "remoteConfigId";
+    public static final String CONFIGURATION_ID_FIELD = "remoteConfigId"; // Alias for DAO compatibility
     public static final String EXPERIMENT_ID = "experimentId";
+    public static final String EXPERIMENT_ID_FIELD = "experimentId"; // Alias for DAO compatibility
     public static final String QUERY = "query";
+    public static final String QUERY_FIELD = "query"; // Alias for DAO compatibility
     public static final String QUERY_TEXT = "queryText";
+    public static final String QUERY_TEXT_FIELD = "queryText"; // Alias for DAO compatibility
     public static final String ERROR_TYPE = "errorType";
+    public static final String ERROR_TYPE_FIELD = "errorType"; // Alias for DAO compatibility
     public static final String ERROR_MESSAGE = "errorMessage";
+    public static final String ERROR_MESSAGE_FIELD = "errorMessage"; // Alias for DAO compatibility
+    public static final String STACK_TRACE = "stackTrace";
+    public static final String STACK_TRACE_FIELD = "stackTrace"; // Alias for DAO compatibility
+    public static final String HTTP_STATUS_CODE = "httpStatusCode";
+    public static final String HTTP_STATUS_CODE_FIELD = "httpStatusCode"; // Alias for DAO compatibility
     public static final String TIMESTAMP = "timestamp";
+    public static final String TIMESTAMP_FIELD = "timestamp"; // Alias for DAO compatibility
     public static final String STATUS = "status";
+    public static final String STATUS_FIELD = "status"; // Alias for DAO compatibility
 
     /**
      * Error types for remote search failures
@@ -131,7 +145,7 @@ public class RemoteSearchFailure implements ToXContentObject {
             return ErrorType.UNKNOWN_ERROR;
         }
 
-        String lowerMessage = message.toLowerCase();
+        String lowerMessage = message.toLowerCase(Locale.ROOT);
         if (lowerMessage.contains("timeout") || lowerMessage.contains("timed out")) {
             return ErrorType.CONNECTION_TIMEOUT;
         } else if (lowerMessage.contains("unauthorized") || lowerMessage.contains("authentication")) {
@@ -155,6 +169,13 @@ public class RemoteSearchFailure implements ToXContentObject {
     }
 
     public String getRemoteConfigId() {
+        return remoteConfigId;
+    }
+
+    /**
+     * Get configuration ID for DAO compatibility (returns remote config ID)
+     */
+    public String getConfigurationId() {
         return remoteConfigId;
     }
 
@@ -184,5 +205,22 @@ public class RemoteSearchFailure implements ToXContentObject {
 
     public String getStatus() {
         return status;
+    }
+
+    /**
+     * Create RemoteSearchFailure from source map for DAO operations
+     */
+    public static RemoteSearchFailure fromSourceMap(java.util.Map<String, Object> sourceMap) {
+        return new RemoteSearchFailure(
+            (String) sourceMap.get(ID),
+            (String) sourceMap.get(REMOTE_CONFIG_ID),
+            (String) sourceMap.get(EXPERIMENT_ID),
+            (String) sourceMap.get(QUERY),
+            (String) sourceMap.get(QUERY_TEXT),
+            (String) sourceMap.get(ERROR_TYPE),
+            (String) sourceMap.get(ERROR_MESSAGE),
+            (String) sourceMap.get(TIMESTAMP),
+            (String) sourceMap.get(STATUS)
+        );
     }
 }

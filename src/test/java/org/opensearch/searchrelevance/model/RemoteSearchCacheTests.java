@@ -14,16 +14,14 @@ import static org.junit.Assert.assertTrue;
 
 import java.io.IOException;
 
-import org.junit.Test;
 import org.opensearch.common.xcontent.XContentType;
 import org.opensearch.core.xcontent.XContentBuilder;
 
 /**
  * Tests for RemoteSearchCache model
  */
-public class RemoteSearchCacheTests {
+public class RemoteSearchCacheTests extends org.apache.lucene.tests.util.LuceneTestCase {
 
-    @Test
     public void testRemoteSearchCacheCreation() {
         long currentTime = System.currentTimeMillis();
         long expirationTime = currentTime + 3600000; // 1 hour later
@@ -49,7 +47,6 @@ public class RemoteSearchCacheTests {
         assertEquals(expirationTime, cache.getExpirationTimestamp());
     }
 
-    @Test
     public void testRemoteSearchCacheToXContent() throws IOException {
         long currentTime = System.currentTimeMillis();
         long expirationTime = currentTime + 3600000;
@@ -77,7 +74,6 @@ public class RemoteSearchCacheTests {
         assertTrue(jsonString.contains("test query"));
     }
 
-    @Test
     public void testCacheExpiration() {
         long currentTime = System.currentTimeMillis();
 
@@ -110,7 +106,6 @@ public class RemoteSearchCacheTests {
         assertFalse("Cache should not be expired", validCache.isExpired());
     }
 
-    @Test
     public void testGenerateCacheKey() {
         String cacheKey1 = RemoteSearchCache.generateCacheKey("config-1", "{\"query\": \"test\"}", "test");
         String cacheKey2 = RemoteSearchCache.generateCacheKey("config-1", "{\"query\": \"test\"}", "test");
@@ -131,7 +126,6 @@ public class RemoteSearchCacheTests {
         assertFalse(cacheKey1.isEmpty());
     }
 
-    @Test
     public void testRemoteSearchCacheConstants() {
         // Verify field name constants
         assertEquals("cacheKey", RemoteSearchCache.CACHE_KEY);
@@ -144,7 +138,6 @@ public class RemoteSearchCacheTests {
         assertEquals("expirationTimestamp", RemoteSearchCache.EXPIRATION_TIMESTAMP);
     }
 
-    @Test
     public void testRemoteSearchCacheWithNullValues() throws IOException {
         RemoteSearchCache cache = new RemoteSearchCache(
             null, // null cache key

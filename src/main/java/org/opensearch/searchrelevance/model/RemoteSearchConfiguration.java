@@ -161,4 +161,11 @@ public class RemoteSearchConfiguration implements ToXContentObject {
     public String getTimestamp() {
         return timestamp;
     }
+
+    /**
+     * Alias for getCacheDurationMinutes() for DAO compatibility
+     */
+    public long getCacheTtlMinutes() {
+        return cacheDurationMinutes;
+    }
 }

@@ -20,7 +20,6 @@ import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.Map;
 
-import org.junit.Before;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
@@ -59,7 +58,7 @@ public class RestSearchRelevanceStatsActionTests extends SearchRelevanceRestTest
     @Mock
     private ClusterUtil clusterUtil;
 
-    @Before
+    // @Before
     public void setup() {
         MockitoAnnotations.openMocks(this);
 

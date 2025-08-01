@@ -15,16 +15,14 @@ import java.io.IOException;
 import java.net.ConnectException;
 import java.net.SocketTimeoutException;
 
-import org.junit.Test;
 import org.opensearch.common.xcontent.XContentType;
 import org.opensearch.core.xcontent.XContentBuilder;
 
 /**
  * Tests for RemoteSearchFailure model
  */
-public class RemoteSearchFailureTests {
+public class RemoteSearchFailureTests extends org.apache.lucene.tests.util.LuceneTestCase {
 
-    @Test
     public void testRemoteSearchFailureCreation() {
         RemoteSearchFailure failure = new RemoteSearchFailure(
             "failure-1",
@@ -49,7 +47,6 @@ public class RemoteSearchFailureTests {
         assertEquals("FAILED", failure.getStatus());
     }
 
-    @Test
     public void testRemoteSearchFailureToXContent() throws IOException {
         RemoteSearchFailure failure = new RemoteSearchFailure(
             "failure-1",
@@ -77,7 +74,6 @@ public class RemoteSearchFailureTests {
         assertTrue(jsonString.contains("Authentication failed"));
     }
 
-    @Test
     public void testFromExceptionWithTimeout() {
         SocketTimeoutException timeoutException = new SocketTimeoutException("Read timed out");
 
@@ -99,7 +95,6 @@ public class RemoteSearchFailureTests {
         assertEquals("FAILED", failure.getStatus());
     }
 
-    @Test
     public void testFromExceptionWithAuthFailure() {
         Exception authException = new RuntimeException("401 Unauthorized - Authentication failed");
 
@@ -117,7 +112,6 @@ public class RemoteSearchFailureTests {
         assertTrue(failure.getErrorMessage().contains("Authentication failed"));
     }
 
-    @Test
     public void testFromExceptionWithNetworkError() {
         ConnectException networkException = new ConnectException("Connection refused");
 
@@ -135,7 +129,6 @@ public class RemoteSearchFailureTests {
         assertEquals("Connection refused", failure.getErrorMessage());
     }
 
-    @Test
     public void testFromExceptionWithRateLimit() {
         Exception rateLimitException = new RuntimeException("429 Too Many Requests - Rate limit exceeded");
 
@@ -153,7 +146,6 @@ public class RemoteSearchFailureTests {
         assertTrue(failure.getErrorMessage().contains("Rate limit exceeded"));
     }
 
-    @Test
     public void testFromExceptionWithServerError() {
         Exception serverException = new RuntimeException("500 Internal Server Error");
 
@@ -171,7 +163,6 @@ public class RemoteSearchFailureTests {
         assertTrue(failure.getErrorMessage().contains("500"));
     }
 
-    @Test
     public void testFromExceptionWithInvalidResponse() {
         Exception parseException = new RuntimeException("Failed to parse response JSON");
 
@@ -189,7 +180,6 @@ public class RemoteSearchFailureTests {
         assertTrue(failure.getErrorMessage().contains("parse"));
     }
 
-    @Test
     public void testFromExceptionWithUnknownError() {
         Exception unknownException = new RuntimeException("Some unexpected error");
 
@@ -207,7 +197,6 @@ public class RemoteSearchFailureTests {
         assertEquals("Some unexpected error", failure.getErrorMessage());
     }
 
-    @Test
     public void testFromExceptionWithNullMessage() {
         Exception nullMessageException = new RuntimeException((String) null);
 
@@ -225,7 +214,6 @@ public class RemoteSearchFailureTests {
         assertEquals(null, failure.getErrorMessage());
     }
 
-    @Test
     public void testRemoteSearchFailureConstants() {
         // Verify field name constants
         assertEquals("id", RemoteSearchFailure.ID);
@@ -239,7 +227,6 @@ public class RemoteSearchFailureTests {
         assertEquals("status", RemoteSearchFailure.STATUS);
     }
 
-    @Test
     public void testErrorTypeEnum() {
         // Verify all error types are available
         RemoteSearchFailure.ErrorType[] errorTypes = RemoteSearchFailure.ErrorType.values();
@@ -255,7 +242,6 @@ public class RemoteSearchFailureTests {
         assertEquals("UNKNOWN_ERROR", RemoteSearchFailure.ErrorType.UNKNOWN_ERROR.name());
     }
 
-    @Test
     public void testStatusEnum() {
         // Verify all status values are available
         RemoteSearchFailure.Status[] statuses = RemoteSearchFailure.Status.values();
