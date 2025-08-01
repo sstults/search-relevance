@@ -43,8 +43,8 @@ Users with external evaluation pipelines need a way to import their pre-computed
 
 2. **Data Format Support**
    - Accept evaluation results in the existing PostExperiment JSON format
-   - Support pre-computed metrics in the evaluationResultList field
-   - Maintain compatibility with existing query sets, search configurations, and judgments
+   - Support pre-computed metrics in the evaluationResultList field, including ones not calculated by SRW natively
+   - Maintain compatibility with existing query sets, search configurations, and judgments JSON formats
 
 3. **Integration with Existing Infrastructure**
    - Use existing EvaluationResult storage and retrieval mechanisms
@@ -62,6 +62,7 @@ Users with external evaluation pipelines need a way to import their pre-computed
    - Validate imported data for consistency and completeness
    - Provide clear error messages for invalid requests
    - Maintain data integrity during import operations
+   - Failed imports marked as ERRORED status
 
 ## Out of Scope
 
@@ -85,7 +86,7 @@ The OpenSearch Search Relevance plugin currently provides:
 - Experiments are created with COMPLETED status immediately
 
 **Components that have been enhanced:**
-- `PostExperimentTransportAction` - Simplified to always import evaluation results
+- `PostExperimentTransportAction` - Focused action to only import evaluation results
 - Request validation - Ensures imported data is valid and complete
 - Synchronous processing - Results are stored immediately
 
