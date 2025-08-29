@@ -12,15 +12,14 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.opensearch.action.delete.DeleteRequest;
 import org.opensearch.action.delete.DeleteResponse;
-import org.opensearch.action.get.GetRequest;
-import org.opensearch.action.index.IndexRequest;
 import org.opensearch.action.index.IndexResponse;
-import org.opensearch.action.search.SearchRequest;
+import org.opensearch.action.search.SearchResponse;
+import org.opensearch.common.unit.TimeValue;
 import org.opensearch.common.xcontent.XContentFactory;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.xcontent.ToXContent;
@@ -28,10 +27,11 @@ import org.opensearch.core.xcontent.XContentBuilder;
 import org.opensearch.index.query.BoolQueryBuilder;
 import org.opensearch.index.query.QueryBuilders;
 import org.opensearch.index.query.RangeQueryBuilder;
+import org.opensearch.search.SearchHit;
 import org.opensearch.search.builder.SearchSourceBuilder;
-import org.opensearch.searchrelevance.common.PluginConstants;
+import org.opensearch.searchrelevance.indices.SearchRelevanceIndices;
+import org.opensearch.searchrelevance.indices.SearchRelevanceIndicesManager;
 import org.opensearch.searchrelevance.model.RemoteSearchCache;
-import org.opensearch.transport.client.Client;
 
 /**
  * Data Access Object for RemoteSearchCache operations.
@@ -40,14 +40,14 @@ import org.opensearch.transport.client.Client;
 public class RemoteSearchCacheDao {
     private static final Logger logger = LogManager.getLogger(RemoteSearchCacheDao.class);
 
-    private final Client client;
+    private final SearchRelevanceIndicesManager indicesManager;
 
-    public RemoteSearchCacheDao(Client client) {
-        this.client = client;
+    public RemoteSearchCacheDao(SearchRelevanceIndicesManager indicesManager) {
+        this.indicesManager = indicesManager;
     }
 
     /**
-     * Store a cache entry with TTL-based expiration.
+     * Store a cache entry with TTL-based expiration. Upserts the document.
      *
      * @param cache the cache entry to store
      * @param listener callback for the operation result
@@ -57,11 +57,8 @@ public class RemoteSearchCacheDao {
             XContentBuilder builder = XContentFactory.jsonBuilder();
             cache.toXContent(builder, ToXContent.EMPTY_PARAMS);
 
-            IndexRequest request = new IndexRequest(PluginConstants.REMOTE_SEARCH_CACHE_INDEX).id(cache.getId())
-                .source(builder)
-                .setRefreshPolicy(org.opensearch.action.support.WriteRequest.RefreshPolicy.IMMEDIATE);
-
-            client.index(request, listener);
+            // Use manager so index is created if absent; upsert behavior
+            indicesManager.updateDocEfficient(cache.getId(), builder, SearchRelevanceIndices.REMOTE_SEARCH_CACHE, listener);
             logger.debug("Storing cache entry with ID: {}", cache.getId());
         } catch (IOException e) {
             logger.error("Failed to store cache entry: {}", e.getMessage(), e);
@@ -71,48 +68,62 @@ public class RemoteSearchCacheDao {
 
     /**
      * Retrieve a cache entry by cache key, checking TTL expiration.
+     * Includes index readiness check to prevent shard failures.
      *
      * @param cacheKey the cache key to retrieve
      * @param listener callback with the cache entry or null if not found/expired
      */
     public void getCache(String cacheKey, ActionListener<RemoteSearchCache> listener) {
-        GetRequest request = new GetRequest(PluginConstants.REMOTE_SEARCH_CACHE_INDEX, cacheKey);
-
-        client.get(request, ActionListener.wrap(response -> {
-            if (!response.isExists()) {
-                logger.debug("Cache miss for key: {}", cacheKey);
-                listener.onResponse(null);
-                return;
-            }
-
-            try {
-                RemoteSearchCache cache = RemoteSearchCache.fromSourceMap(response.getSourceAsMap());
-
-                // Check if cache entry has expired
-                if (cache.isExpired()) {
-                    logger.debug("Cache entry expired for key: {}", cacheKey);
-                    // Asynchronously delete expired entry
-                    deleteCache(
-                        cacheKey,
-                        ActionListener.wrap(
-                            deleteResponse -> logger.debug("Deleted expired cache entry: {}", cacheKey),
-                            deleteError -> logger.warn("Failed to delete expired cache entry: {}", deleteError.getMessage())
-                        )
-                    );
+        // Direct cache lookup; index readiness issues are treated as expected errors in onFailure
+        indicesManager.getDocByDocId(cacheKey, SearchRelevanceIndices.REMOTE_SEARCH_CACHE, new ActionListener<SearchResponse>() {
+            @Override
+            public void onResponse(SearchResponse response) {
+                long total = Objects.requireNonNull(response.getHits().getTotalHits()).value();
+                if (total == 0) {
+                    logger.debug("Cache miss for key: {}", cacheKey);
                     listener.onResponse(null);
                     return;
                 }
 
-                logger.debug("Cache hit for key: {}", cacheKey);
-                listener.onResponse(cache);
-            } catch (Exception e) {
-                logger.error("Failed to parse cache entry for key {}: {}", cacheKey, e.getMessage(), e);
-                listener.onFailure(e);
+                try {
+                    SearchHit hit = response.getHits().getAt(0);
+                    RemoteSearchCache cache = RemoteSearchCache.fromSourceMap(hit.getSourceAsMap());
+
+                    // Check if cache entry has expired
+                    if (cache.isExpired()) {
+                        logger.debug("Cache entry expired for key: {}", cacheKey);
+                        // Asynchronously delete expired entry
+                        deleteCache(
+                            cacheKey,
+                            ActionListener.wrap(
+                                deleteResponse -> logger.debug("Deleted expired cache entry: {}", cacheKey),
+                                deleteError -> logger.warn("Failed to delete expired cache entry: {}", deleteError.getMessage())
+                            )
+                        );
+                        listener.onResponse(null);
+                        return;
+                    }
+
+                    logger.debug("Cache hit for key: {}", cacheKey);
+                    listener.onResponse(cache);
+                } catch (Exception e) {
+                    logger.error("Failed to parse cache entry for key {}: {}", cacheKey, e.getMessage(), e);
+                    listener.onFailure(e);
+                }
             }
-        }, error -> {
-            logger.error("Failed to retrieve cache entry for key {}: {}", cacheKey, error.getMessage(), error);
-            listener.onFailure(error);
-        }));
+
+            @Override
+            public void onFailure(Exception e) {
+                // Categorize cache errors vs normal cache misses
+                if (isExpectedCacheError(e)) {
+                    logger.debug("Cache lookup failed for key {} (expected - treating as cache miss): {}", cacheKey, e.getMessage());
+                    listener.onResponse(null); // Treat as cache miss, don't fail the request
+                } else {
+                    logger.error("Failed to retrieve cache entry for key {}: {}", cacheKey, e.getMessage(), e);
+                    listener.onFailure(e);
+                }
+            }
+        });
     }
 
     /**
@@ -122,17 +133,7 @@ public class RemoteSearchCacheDao {
      * @param listener callback for the operation result
      */
     public void deleteCache(String cacheKey, ActionListener<DeleteResponse> listener) {
-        DeleteRequest request = new DeleteRequest(PluginConstants.REMOTE_SEARCH_CACHE_INDEX, cacheKey).setRefreshPolicy(
-            org.opensearch.action.support.WriteRequest.RefreshPolicy.IMMEDIATE
-        );
-
-        client.delete(request, ActionListener.wrap(response -> {
-            logger.debug("Deleted cache entry with key: {}", cacheKey);
-            listener.onResponse(response);
-        }, error -> {
-            logger.error("Failed to delete cache entry for key {}: {}", cacheKey, error.getMessage(), error);
-            listener.onFailure(error);
-        }));
+        indicesManager.deleteDocByDocId(cacheKey, SearchRelevanceIndices.REMOTE_SEARCH_CACHE, listener);
     }
 
     /**
@@ -142,65 +143,68 @@ public class RemoteSearchCacheDao {
      * @param listener callback for the operation result
      */
     public void clearCacheForConfiguration(String configurationId, ActionListener<Void> listener) {
-        // First, search for all cache entries with the given configuration ID
         BoolQueryBuilder queryBuilder = QueryBuilders.boolQuery()
             .must(QueryBuilders.termQuery(RemoteSearchCache.CONFIGURATION_ID_FIELD, configurationId));
 
-        SearchRequest searchRequest = new SearchRequest(PluginConstants.REMOTE_SEARCH_CACHE_INDEX).source(
-            new SearchSourceBuilder().query(queryBuilder)
-                .size(1000) // Process in batches
-                .fetchSource(false)
-        ); // We only need document IDs
+        SearchSourceBuilder sourceBuilder = new SearchSourceBuilder().query(queryBuilder)
+            .size(1000) // Process in batches
+            .fetchSource(false); // We only need document IDs
 
-        client.search(searchRequest, ActionListener.wrap(searchResponse -> {
-            List<String> cacheKeysToDelete = new ArrayList<>();
-            searchResponse.getHits().forEach(hit -> cacheKeysToDelete.add(hit.getId()));
+        indicesManager.listDocsBySearchRequest(
+            sourceBuilder,
+            SearchRelevanceIndices.REMOTE_SEARCH_CACHE,
+            ActionListener.wrap(searchResponse -> {
+                List<String> cacheKeysToDelete = new ArrayList<>();
+                searchResponse.getHits().forEach(hit -> cacheKeysToDelete.add(hit.getId()));
 
-            if (cacheKeysToDelete.isEmpty()) {
-                logger.debug("No cache entries found for configuration: {}", configurationId);
-                listener.onResponse(null);
-                return;
-            }
+                if (cacheKeysToDelete.isEmpty()) {
+                    logger.debug("No cache entries found for configuration: {}", configurationId);
+                    listener.onResponse(null);
+                    return;
+                }
 
-            // Delete cache entries in parallel
-            deleteCacheEntries(cacheKeysToDelete, 0, listener);
-        }, error -> {
-            logger.error("Failed to search cache entries for configuration {}: {}", configurationId, error.getMessage(), error);
-            listener.onFailure(error);
-        }));
+                // Delete cache entries in parallel (sequential loop)
+                deleteCacheEntries(cacheKeysToDelete, 0, listener);
+            }, error -> {
+                logger.error("Failed to search cache entries for configuration {}: {}", configurationId, error.getMessage(), error);
+                listener.onFailure(error);
+            })
+        );
     }
 
     /**
      * Clean up expired cache entries across all configurations.
      *
-     * @param listener callback for the operation result
+     * @param listener callback with the number of deleted entries
      */
     public void cleanupExpiredEntries(ActionListener<Integer> listener) {
         // Search for expired entries
         RangeQueryBuilder expiredQuery = QueryBuilders.rangeQuery(RemoteSearchCache.TIMESTAMP_FIELD).lt(Instant.now().toEpochMilli());
 
-        SearchRequest searchRequest = new SearchRequest(PluginConstants.REMOTE_SEARCH_CACHE_INDEX).source(
-            new SearchSourceBuilder().query(expiredQuery)
-                .size(1000) // Process in batches
-                .fetchSource(false)
-        ); // We only need document IDs
+        SearchSourceBuilder sourceBuilder = new SearchSourceBuilder().query(expiredQuery)
+            .size(1000) // Process in batches
+            .fetchSource(false); // We only need document IDs
 
-        client.search(searchRequest, ActionListener.wrap(searchResponse -> {
-            List<String> expiredKeys = new ArrayList<>();
-            searchResponse.getHits().forEach(hit -> expiredKeys.add(hit.getId()));
+        indicesManager.listDocsBySearchRequest(
+            sourceBuilder,
+            SearchRelevanceIndices.REMOTE_SEARCH_CACHE,
+            ActionListener.wrap(searchResponse -> {
+                List<String> expiredKeys = new ArrayList<>();
+                searchResponse.getHits().forEach(hit -> expiredKeys.add(hit.getId()));
 
-            if (expiredKeys.isEmpty()) {
-                logger.debug("No expired cache entries found");
-                listener.onResponse(0);
-                return;
-            }
+                if (expiredKeys.isEmpty()) {
+                    logger.debug("No expired cache entries found");
+                    listener.onResponse(0);
+                    return;
+                }
 
-            logger.info("Found {} expired cache entries to clean up", expiredKeys.size());
-            deleteCacheEntries(expiredKeys, 0, ActionListener.wrap(result -> listener.onResponse(expiredKeys.size()), listener::onFailure));
-        }, error -> {
-            logger.error("Failed to search for expired cache entries: {}", error.getMessage(), error);
-            listener.onFailure(error);
-        }));
+                logger.info("Found {} expired cache entries to clean up", expiredKeys.size());
+                deleteCacheEntries(expiredKeys, 0, ActionListener.wrap(v -> listener.onResponse(expiredKeys.size()), listener::onFailure));
+            }, error -> {
+                logger.error("Failed to search for expired cache entries: {}", error.getMessage(), error);
+                listener.onFailure(error);
+            })
+        );
     }
 
     /**
@@ -238,40 +242,109 @@ public class RemoteSearchCacheDao {
     }
 
     /**
+     * Check if the cache index is ready for operations.
+     * This prevents shard failures when the index is still initializing.
+     *
+     * @param listener callback with readiness status
+     */
+    private void checkCacheIndexReadiness(ActionListener<Boolean> listener) {
+        // Use a simple search to test if the index is ready
+        // This is more reliable than just checking if index exists
+        try {
+            SearchSourceBuilder sourceBuilder = new SearchSourceBuilder().query(QueryBuilders.matchAllQuery())
+                .size(0) // We don't need results, just want to test if index is ready
+                .timeout(TimeValue.timeValueSeconds(1)); // Quick timeout
+
+            indicesManager.listDocsBySearchRequest(
+                sourceBuilder,
+                SearchRelevanceIndices.REMOTE_SEARCH_CACHE,
+                ActionListener.wrap(searchResponse -> {
+                    logger.debug("Cache index readiness check successful");
+                    listener.onResponse(true);
+                }, error -> {
+                    logger.debug("Cache index not ready: {}", error.getMessage());
+                    listener.onResponse(false);
+                })
+            );
+        } catch (Exception e) {
+            logger.debug("Cache index readiness check failed with exception: {}", e.getMessage());
+            listener.onResponse(false);
+        }
+    }
+
+    /**
+     * Determine if a cache operation error is expected (e.g., index not ready, shard failures)
+     * vs unexpected errors that should be propagated.
+     *
+     * @param error the exception to categorize
+     * @return true if this is an expected cache error that should be treated as cache miss
+     */
+    private boolean isExpectedCacheError(Exception error) {
+        String errorMessage = error.getMessage();
+        if (errorMessage == null) {
+            return false;
+        }
+
+        // Check exception type first - ResourceNotFoundException is always a normal cache miss
+        if (error instanceof org.opensearch.ResourceNotFoundException) {
+            return true;
+        }
+
+        // Check for SearchRelevanceException with specific cache-related causes
+        if (error instanceof org.opensearch.searchrelevance.exception.SearchRelevanceException) {
+            // These are typically index readiness issues, treat as expected
+            return errorMessage.contains("Failed to get document")
+                || errorMessage.contains("all shards failed")
+                || errorMessage.contains("SearchPhaseExecutionException");
+        }
+
+        // Common patterns for expected cache errors (fallback string matching)
+        return errorMessage.contains("Document not found")
+            || errorMessage.contains("all shards failed")
+            || errorMessage.contains("SearchPhaseExecutionException")
+            || errorMessage.contains("index_not_found_exception")
+            || errorMessage.contains("Failed to get document")
+            || errorMessage.contains("no such index")
+            || errorMessage.contains("IndexNotFoundException");
+    }
+
+    /**
      * Get cache statistics for monitoring.
      *
      * @param listener callback with cache statistics
      */
     public void getCacheStats(ActionListener<Map<String, Object>> listener) {
-        SearchRequest searchRequest = new SearchRequest(PluginConstants.REMOTE_SEARCH_CACHE_INDEX).source(
-            new SearchSourceBuilder().size(0) // We only want aggregations
-                .aggregation(
-                    org.opensearch.search.aggregations.AggregationBuilders.terms("by_configuration")
-                        .field(RemoteSearchCache.CONFIGURATION_ID_FIELD + ".keyword")
-                        .size(100)
-                )
-                .aggregation(
-                    org.opensearch.search.aggregations.AggregationBuilders.dateHistogram("by_hour")
-                        .field(RemoteSearchCache.TIMESTAMP_FIELD)
-                        .calendarInterval(org.opensearch.search.aggregations.bucket.histogram.DateHistogramInterval.HOUR)
-                        .minDocCount(1)
-                )
+        SearchSourceBuilder sourceBuilder = new SearchSourceBuilder().size(0) // We only want aggregations
+            .aggregation(
+                org.opensearch.search.aggregations.AggregationBuilders.terms("by_configuration")
+                    .field(RemoteSearchCache.CONFIGURATION_ID_FIELD + ".keyword")
+                    .size(100)
+            )
+            .aggregation(
+                org.opensearch.search.aggregations.AggregationBuilders.dateHistogram("by_hour")
+                    .field(RemoteSearchCache.TIMESTAMP_FIELD)
+                    .calendarInterval(org.opensearch.search.aggregations.bucket.histogram.DateHistogramInterval.HOUR)
+                    .minDocCount(1)
+            );
+
+        indicesManager.listDocsBySearchRequest(
+            sourceBuilder,
+            SearchRelevanceIndices.REMOTE_SEARCH_CACHE,
+            ActionListener.wrap(searchResponse -> {
+                Map<String, Object> stats = new java.util.HashMap<>();
+                stats.put("total_entries", Objects.requireNonNull(searchResponse.getHits().getTotalHits()).value());
+
+                // Handle null aggregations
+                if (searchResponse.getAggregations() != null) {
+                    stats.put("aggregations", searchResponse.getAggregations().asMap());
+                } else {
+                    stats.put("aggregations", new java.util.HashMap<>());
+                }
+                listener.onResponse(stats);
+            }, error -> {
+                logger.error("Failed to get cache statistics: {}", error.getMessage(), error);
+                listener.onFailure(error);
+            })
         );
-
-        client.search(searchRequest, ActionListener.wrap(searchResponse -> {
-            Map<String, Object> stats = new java.util.HashMap<>();
-            stats.put("total_entries", searchResponse.getHits().getTotalHits().value());
-
-            // Handle null aggregations
-            if (searchResponse.getAggregations() != null) {
-                stats.put("aggregations", searchResponse.getAggregations().asMap());
-            } else {
-                stats.put("aggregations", new java.util.HashMap<>());
-            }
-            listener.onResponse(stats);
-        }, error -> {
-            logger.error("Failed to get cache statistics: {}", error.getMessage(), error);
-            listener.onFailure(error);
-        }));
     }
 }

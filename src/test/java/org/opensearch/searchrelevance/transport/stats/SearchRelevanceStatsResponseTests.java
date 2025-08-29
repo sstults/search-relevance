@@ -48,8 +48,9 @@ public class SearchRelevanceStatsResponseTests extends OpenSearchTestCase {
     @Mock
     private StreamOutput mockStreamOutput;
 
-    // @Before
-    public void setup() {
+    @Override
+    public void setUp() throws Exception {
+        super.setUp();
         MockitoAnnotations.openMocks(this);
         clusterName = new ClusterName("test-cluster");
         nodes = new ArrayList<>();

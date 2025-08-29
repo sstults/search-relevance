@@ -17,6 +17,8 @@ import org.opensearch.common.xcontent.XContentFactory;
 import org.opensearch.core.xcontent.XContentBuilder;
 import org.opensearch.core.xcontent.XContentParser;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import lombok.extern.log4j.Log4j2;
 
 /**
@@ -27,6 +29,8 @@ import lombok.extern.log4j.Log4j2;
 @Log4j2
 public class RemoteResponseMapper {
 
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
     /**
      * Map a remote search response to OpenSearch format using response template
      *
@@ -35,7 +39,9 @@ public class RemoteResponseMapper {
      * @return Mapped response in OpenSearch format
      */
     public String mapResponse(String rawResponse, String responseTemplate) {
-        if (rawResponse == null || rawResponse.trim().isEmpty()) {
+        // Enhanced null/empty response handling
+        if (rawResponse == null || rawResponse.trim().isEmpty() || "null".equals(rawResponse.trim())) {
+            log.debug("Received null or empty raw response, returning empty OpenSearch response");
             return createEmptyResponse();
         }
 
@@ -45,21 +51,116 @@ public class RemoteResponseMapper {
         }
 
         try {
-            // Parse the raw response
+            // Parse the raw response with enhanced error handling
             Map<String, Object> rawData = parseJsonToMap(rawResponse);
+            if (rawData == null || rawData.isEmpty()) {
+                log.debug("Raw response parsed to null or empty map, returning empty OpenSearch response");
+                return createEmptyResponse();
+            }
 
-            // Parse the response template
-            Map<String, Object> template = parseJsonToMap(responseTemplate);
+            // Check if response template is a template string (contains ${}) or JSON mapping
+            if (responseTemplate.contains("${")) {
+                // This is a template string, not a JSON mapping - apply template substitution
+                log.debug("Response template contains template variables, applying template substitution");
+                String result = applyTemplateSubstitution(rawData, responseTemplate);
 
-            // Apply the mapping
-            Map<String, Object> mappedData = applyMapping(rawData, template);
+                // Validate the result
+                if (result == null || "null".equals(result.trim()) || result.trim().isEmpty()) {
+                    log.debug("Template substitution resulted in null or empty result, falling back to default mapping");
+                    return mapWithDefaultTemplate(rawResponse);
+                }
 
-            // Convert back to JSON
-            return mapToJson(mappedData);
+                return result;
+            } else {
+                // This should be a JSON mapping configuration
+                Map<String, Object> template = parseJsonToMap(responseTemplate);
+                if (template == null || template.isEmpty()) {
+                    log.debug("Response template parsed to null or empty map, falling back to default mapping");
+                    return mapWithDefaultTemplate(rawResponse);
+                }
+
+                // Apply the mapping
+                Map<String, Object> mappedData = applyMapping(rawData, template);
+
+                // Validate mapped data has proper structure
+                if (mappedData == null || mappedData.isEmpty()) {
+                    log.debug("Mapping resulted in null or empty data, returning empty OpenSearch response");
+                    return createEmptyResponse();
+                }
+
+                // Convert back to JSON
+                String result = mapToJson(mappedData);
+
+                // Final validation - ensure result is not null or "null"
+                if (result == null || "null".equals(result.trim()) || result.trim().isEmpty()) {
+                    log.debug("Final mapping result is null or empty, returning empty OpenSearch response");
+                    return createEmptyResponse();
+                }
+
+                return result;
+            }
 
         } catch (Exception e) {
-            log.error("Failed to map remote response: {}", e.getMessage());
+            log.debug("Failed to map remote response: {}", e.getMessage());
             return createErrorResponse(e.getMessage());
+        }
+    }
+
+    /**
+     * Apply template substitution for template strings containing ${} variables
+     */
+    private String applyTemplateSubstitution(Map<String, Object> rawData, String template) {
+        try {
+            String result = template;
+
+            // Simple template variable substitution for ${path} syntax
+            // This is a basic implementation - for production use, consider a proper template engine
+            while (result.contains("${")) {
+                int startIndex = result.indexOf("${");
+                int endIndex = result.indexOf("}", startIndex);
+
+                if (endIndex == -1) {
+                    // Malformed template variable, break to avoid infinite loop
+                    log.debug("Malformed template variable in response template, missing closing }");
+                    break;
+                }
+
+                String variable = result.substring(startIndex + 2, endIndex);
+                Object value = extractValueByPath(rawData, variable);
+
+                String replacement;
+                if (value == null) {
+                    replacement = "null";
+                } else if (value instanceof String) {
+                    replacement = "\"" + value.toString().replace("\"", "\\\"") + "\"";
+                } else if (value instanceof List || value instanceof Map) {
+                    // For complex objects (arrays or objects), serialize directly to JSON without wrapping
+                    try {
+                        replacement = OBJECT_MAPPER.writeValueAsString(value);
+                    } catch (Exception e) {
+                        replacement = "null";
+                    }
+                } else {
+                    replacement = value.toString();
+                }
+
+                result = result.substring(0, startIndex) + replacement + result.substring(endIndex + 1);
+            }
+
+            // Validate that the result is valid JSON
+            try {
+                parseJsonToMap(result);
+                return result;
+            } catch (Exception e) {
+                log.debug("Template substitution resulted in invalid JSON: {}", e.getMessage());
+                log.debug("Template substitution result was: {}", result);
+                // Fall back to default mapping
+                return null;
+            }
+
+        } catch (Exception e) {
+            log.debug("Failed to apply template substitution: {}", e.getMessage());
+            return null;
         }
     }
 
@@ -75,6 +176,15 @@ public class RemoteResponseMapper {
                 return rawResponse; // Already in correct format
             }
 
+            // Detect Solr JSON Response API: response.docs under 'response'
+            if (rawData.containsKey("response") && rawData.get("response") instanceof Map) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> response = (Map<String, Object>) rawData.get("response");
+                if (response.get("docs") instanceof List) {
+                    return mapSolrFormat(rawData);
+                }
+            }
+
             // Try to detect common search response patterns
             if (rawData.containsKey("results") || rawData.containsKey("documents")) {
                 return mapCommonFormat(rawData);
@@ -84,7 +194,7 @@ public class RemoteResponseMapper {
             return wrapInBasicFormat(rawData);
 
         } catch (Exception e) {
-            log.warn("Failed to apply default mapping, returning raw response: {}", e.getMessage());
+            log.debug("Failed to apply default mapping, returning raw response: {}", e.getMessage());
             return rawResponse;
         }
     }
@@ -111,15 +221,13 @@ public class RemoteResponseMapper {
                 @SuppressWarnings("unchecked")
                 Map<String, Object> config = (Map<String, Object>) mappingConfig;
 
-                // Check if this is a nested structure (like hits.total, hits.hits)
+                // Check if this is a mapping configuration or nested structure
                 if (config.containsKey("path") || config.containsKey("type") || config.containsKey("default")) {
-                    // This is a mapping configuration
                     Object value = applyComplexMapping(rawData, config);
-                    if (value != null) {
-                        result.put(targetField, value);
-                    }
+                    // Always add the value, even if null, because applyComplexMapping handles defaults
+                    result.put(targetField, value);
                 } else {
-                    // This is a nested structure, recursively apply mapping
+                    // Nested structure: recursively apply mapping
                     Map<String, Object> nestedResult = applyMapping(rawData, config);
                     if (!nestedResult.isEmpty()) {
                         result.put(targetField, nestedResult);
@@ -170,26 +278,40 @@ public class RemoteResponseMapper {
             return data.get(path);
         }
 
-        // Split path and navigate
-        String[] parts = path.split("\\.");
+        // Parse the path more carefully to handle array notation
         Object current = data;
+        String remainingPath = path;
 
-        for (String part : parts) {
-            if (current == null) {
-                return null;
+        while (!remainingPath.isEmpty() && current != null) {
+            String nextPart;
+            String restOfPath;
+
+            // Check if we have a dot separator
+            int dotIndex = remainingPath.indexOf('.');
+            if (dotIndex == -1) {
+                // No more dots, this is the last part
+                nextPart = remainingPath;
+                restOfPath = "";
+            } else {
+                nextPart = remainingPath.substring(0, dotIndex);
+                restOfPath = remainingPath.substring(dotIndex + 1);
             }
 
-            // Handle array access like "hits[0]"
-            if (part.contains("[") && part.contains("]")) {
-                String fieldName = part.substring(0, part.indexOf('['));
-                String indexStr = part.substring(part.indexOf('[') + 1, part.indexOf(']'));
+            // Handle array access in this part
+            if (nextPart.contains("[") && nextPart.contains("]")) {
+                String fieldName = nextPart.substring(0, nextPart.indexOf('['));
+                String indexStr = nextPart.substring(nextPart.indexOf('[') + 1, nextPart.indexOf(']'));
 
+                // First get the field
                 if (current instanceof Map) {
                     @SuppressWarnings("unchecked")
                     Map<String, Object> map = (Map<String, Object>) current;
                     current = map.get(fieldName);
+                } else {
+                    return null;
                 }
 
+                // Then access the array index
                 if (current instanceof List) {
                     @SuppressWarnings("unchecked")
                     List<Object> list = (List<Object>) current;
@@ -211,11 +333,13 @@ public class RemoteResponseMapper {
                 if (current instanceof Map) {
                     @SuppressWarnings("unchecked")
                     Map<String, Object> map = (Map<String, Object>) current;
-                    current = map.get(part);
+                    current = map.get(nextPart);
                 } else {
                     return null;
                 }
             }
+
+            remainingPath = restOfPath;
         }
 
         return current;
@@ -258,7 +382,7 @@ public class RemoteResponseMapper {
                     return value;
             }
         } catch (Exception e) {
-            log.warn("Failed to transform value {} to type {}: {}", value, type, e.getMessage());
+            log.debug("Failed to transform value {} to type {}: {}", value, type, e.getMessage());
             return value;
         }
     }
@@ -318,7 +442,101 @@ public class RemoteResponseMapper {
             return mapToJson(opensearchFormat);
 
         } catch (Exception e) {
-            log.error("Failed to map common format: {}", e.getMessage());
+            log.debug("Failed to map common format: {}", e.getMessage());
+            return createErrorResponse(e.getMessage());
+        }
+    }
+
+    /**
+     * Map Solr JSON response (response.docs/numFound and optional responseHeader.QTime) to OpenSearch format
+     */
+    private String mapSolrFormat(Map<String, Object> rawData) {
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> response = (Map<String, Object>) rawData.get("response");
+
+            @SuppressWarnings("unchecked")
+            List<Object> docs = (List<Object>) response.get("docs");
+
+            int totalHits = 0;
+            Object numFoundObj = response.get("numFound");
+            if (numFoundObj instanceof Number) {
+                totalHits = ((Number) numFoundObj).intValue();
+            } else if (numFoundObj != null) {
+                try {
+                    totalHits = Integer.parseInt(numFoundObj.toString());
+                } catch (NumberFormatException ignore) {
+                    // keep default
+                }
+            }
+
+            List<Map<String, Object>> hits = new ArrayList<>();
+            if (docs != null) {
+                for (int i = 0; i < docs.size(); i++) {
+                    Object item = docs.get(i);
+                    if (item instanceof Map) {
+                        @SuppressWarnings("unchecked")
+                        Map<String, Object> doc = (Map<String, Object>) item;
+
+                        Map<String, Object> hit = new HashMap<>();
+                        hit.put("_index", "remote");
+                        Object id = doc.getOrDefault("id", String.valueOf(i));
+                        hit.put("_id", id);
+
+                        double score = 1.0;
+                        Object scoreObj = doc.get("score");
+                        if (scoreObj instanceof Number) {
+                            score = ((Number) scoreObj).doubleValue();
+                        } else if (scoreObj != null) {
+                            try {
+                                score = Double.parseDouble(scoreObj.toString());
+                            } catch (Exception ignore) {
+                                // keep default
+                            }
+                        }
+                        hit.put("_score", score);
+                        hit.put("_source", doc);
+
+                        hits.add(hit);
+                    }
+                }
+            }
+
+            Map<String, Object> total = new HashMap<>();
+            total.put("value", totalHits);
+            total.put("relation", "eq");
+
+            Map<String, Object> hitsContainer = new HashMap<>();
+            hitsContainer.put("total", total);
+            hitsContainer.put("max_score", hits.isEmpty() ? null : 1.0);
+            hitsContainer.put("hits", hits);
+
+            Map<String, Object> opensearchFormat = new HashMap<>();
+            opensearchFormat.put("hits", hitsContainer);
+
+            // took from responseHeader.QTime if available (milliseconds)
+            int took = 1;
+            Object headerObj = rawData.get("responseHeader");
+            if (headerObj instanceof Map) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> header = (Map<String, Object>) headerObj;
+                Object qtime = header.get("QTime");
+                if (qtime instanceof Number) {
+                    took = ((Number) qtime).intValue();
+                } else if (qtime != null) {
+                    try {
+                        took = Integer.parseInt(qtime.toString());
+                    } catch (Exception ignore) {
+                        // keep default
+                    }
+                }
+            }
+            opensearchFormat.put("took", took);
+            opensearchFormat.put("timed_out", false);
+
+            return mapToJson(opensearchFormat);
+        } catch (Exception e) {
+            log.debug("Failed to map Solr format: {}", e.getMessage());
             return createErrorResponse(e.getMessage());
         }
     }
@@ -351,7 +569,7 @@ public class RemoteResponseMapper {
             return mapToJson(opensearchFormat);
 
         } catch (Exception e) {
-            log.error("Failed to wrap in basic format: {}", e.getMessage());
+            log.debug("Failed to wrap in basic format: {}", e.getMessage());
             return createErrorResponse(e.getMessage());
         }
     }
@@ -364,10 +582,28 @@ public class RemoteResponseMapper {
             return new HashMap<>();
         }
 
-        // Simple approach: just remove all newlines and extra whitespace
-        String cleanJson = json.replaceAll("\\s+", " ").trim();
+        // Clean the JSON string to remove any potential BOM or invisible characters
+        String cleanedJson = json;
 
-        try (XContentParser parser = XContentFactory.jsonBuilder().contentType().xContent().createParser(null, null, cleanJson)) {
+        // Remove BOM if present
+        if (cleanedJson.startsWith("\uFEFF")) {
+            cleanedJson = cleanedJson.substring(1);
+        }
+
+        // Remove any leading/trailing whitespace and control characters
+        cleanedJson = cleanedJson.trim();
+
+        // Remove any non-printable characters at the beginning
+        while (cleanedJson.length() > 0
+            && cleanedJson.charAt(0) < 32
+            && cleanedJson.charAt(0) != '\t'
+            && cleanedJson.charAt(0) != '\n'
+            && cleanedJson.charAt(0) != '\r') {
+            cleanedJson = cleanedJson.substring(1);
+        }
+
+        // Parse JSON directly without aggressive whitespace cleaning
+        try (XContentParser parser = XContentFactory.jsonBuilder().contentType().xContent().createParser(null, null, cleanedJson)) {
             return parser.map();
         }
     }
@@ -403,6 +639,7 @@ public class RemoteResponseMapper {
 
             return mapToJson(response);
         } catch (Exception e) {
+            log.debug("Failed to create empty response: {}", e.getMessage());
             return "{\"hits\":{\"total\":{\"value\":0,\"relation\":\"eq\"},\"hits\":[]}}";
         }
     }

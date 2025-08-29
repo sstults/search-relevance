@@ -26,6 +26,10 @@ public class PluginConstants {
     public static final String JUDGMENTS_URL = SEARCH_RELEVANCE_BASE_URI + "/judgments";
     /** The URI for this plugin's search configurations rest actions */
     public static final String SEARCH_CONFIGURATIONS_URL = SEARCH_RELEVANCE_BASE_URI + "/search_configurations";
+    /** The URI for this plugin's remote search configuration rest actions */
+    public static final String REMOTE_SEARCH_CONFIGURATIONS_URL = SEARCH_RELEVANCE_BASE_URI + "/remote_search_configurations";
+    /** The URI for this plugin's remote search execute rest action */
+    public static final String REMOTE_SEARCH_EXECUTE_URL = SEARCH_RELEVANCE_BASE_URI + "/remote_search/execute";
     /** The URI for initializing the UBI indices */
     public static final String INITIALIZE_URL = "/_plugins/ubi/initialize";
 

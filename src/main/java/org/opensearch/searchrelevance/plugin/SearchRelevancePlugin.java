@@ -61,15 +61,19 @@ import org.opensearch.searchrelevance.rest.RestCreateQuerySetAction;
 import org.opensearch.searchrelevance.rest.RestDeleteExperimentAction;
 import org.opensearch.searchrelevance.rest.RestDeleteJudgmentAction;
 import org.opensearch.searchrelevance.rest.RestDeleteQuerySetAction;
+import org.opensearch.searchrelevance.rest.RestDeleteRemoteSearchConfigurationAction;
 import org.opensearch.searchrelevance.rest.RestDeleteSearchConfigurationAction;
 import org.opensearch.searchrelevance.rest.RestGetExperimentAction;
 import org.opensearch.searchrelevance.rest.RestGetJudgmentAction;
 import org.opensearch.searchrelevance.rest.RestGetQuerySetAction;
+import org.opensearch.searchrelevance.rest.RestGetRemoteSearchConfigurationAction;
 import org.opensearch.searchrelevance.rest.RestGetSearchConfigurationAction;
 import org.opensearch.searchrelevance.rest.RestPutExperimentAction;
 import org.opensearch.searchrelevance.rest.RestPutJudgmentAction;
 import org.opensearch.searchrelevance.rest.RestPutQuerySetAction;
+import org.opensearch.searchrelevance.rest.RestPutRemoteSearchConfigurationAction;
 import org.opensearch.searchrelevance.rest.RestPutSearchConfigurationAction;
+import org.opensearch.searchrelevance.rest.RestRemoteSearchExecuteAction;
 import org.opensearch.searchrelevance.rest.RestSearchRelevanceStatsAction;
 import org.opensearch.searchrelevance.settings.SearchRelevanceSettingsAccessor;
 import org.opensearch.searchrelevance.stats.events.EventStatsManager;
@@ -164,9 +168,9 @@ public class SearchRelevancePlugin extends Plugin implements ActionPlugin, Syste
         this.judgmentDao = new JudgmentDao(searchRelevanceIndicesManager);
         this.evaluationResultDao = new EvaluationResultDao(searchRelevanceIndicesManager);
         this.judgmentCacheDao = new JudgmentCacheDao(searchRelevanceIndicesManager);
-        this.remoteSearchConfigurationDao = new RemoteSearchConfigurationDao(client);
-        this.remoteSearchCacheDao = new RemoteSearchCacheDao(client);
-        this.remoteSearchFailureDao = new RemoteSearchFailureDao(client);
+        this.remoteSearchConfigurationDao = new RemoteSearchConfigurationDao(searchRelevanceIndicesManager);
+        this.remoteSearchCacheDao = new RemoteSearchCacheDao(searchRelevanceIndicesManager);
+        this.remoteSearchFailureDao = new RemoteSearchFailureDao(searchRelevanceIndicesManager);
         MachineLearningNodeClient mlClient = new MachineLearningNodeClient(client);
         this.mlAccessor = new MLAccessor(mlClient);
         SearchRelevanceExecutor.initialize(threadPool);
@@ -225,7 +229,12 @@ public class SearchRelevancePlugin extends Plugin implements ActionPlugin, Syste
             new RestPutExperimentAction(settingsAccessor),
             new RestGetExperimentAction(settingsAccessor),
             new RestDeleteExperimentAction(settingsAccessor),
-            new RestSearchRelevanceStatsAction(settingsAccessor, clusterUtil)
+            new RestSearchRelevanceStatsAction(settingsAccessor, clusterUtil),
+            // Remote search capability
+            new RestPutRemoteSearchConfigurationAction(settingsAccessor, remoteSearchConfigurationDao),
+            new RestGetRemoteSearchConfigurationAction(settingsAccessor, remoteSearchConfigurationDao),
+            new RestDeleteRemoteSearchConfigurationAction(settingsAccessor, remoteSearchConfigurationDao),
+            new RestRemoteSearchExecuteAction(settingsAccessor, remoteSearchConfigurationDao, remoteSearchCacheDao, remoteSearchFailureDao)
         );
     }
 

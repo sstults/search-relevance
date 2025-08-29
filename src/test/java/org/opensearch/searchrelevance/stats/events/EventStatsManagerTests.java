@@ -28,8 +28,9 @@ public class EventStatsManagerTests extends OpenSearchTestCase {
 
     private EventStatsManager eventStatsManager;
 
-    // @Before
-    public void setup() {
+    @Override
+    public void setUp() throws Exception {
+        super.setUp();
         MockitoAnnotations.openMocks(this);
         eventStatsManager = new EventStatsManager();
         eventStatsManager.initialize(mockSettingsAccessor);

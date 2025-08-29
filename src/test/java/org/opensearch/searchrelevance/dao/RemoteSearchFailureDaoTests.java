@@ -8,7 +8,7 @@
 package org.opensearch.searchrelevance.dao;
 
 import static org.junit.Assert.*;
-import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 import java.time.Instant;
@@ -19,25 +19,24 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.apache.lucene.search.TotalHits;
-import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
-import org.opensearch.action.index.IndexRequest;
 import org.opensearch.action.index.IndexResponse;
-import org.opensearch.action.search.SearchRequest;
 import org.opensearch.action.search.SearchResponse;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.common.bytes.BytesArray;
+import org.opensearch.core.xcontent.XContentBuilder;
 import org.opensearch.search.SearchHit;
 import org.opensearch.search.SearchHits;
-import org.opensearch.searchrelevance.common.PluginConstants;
+import org.opensearch.search.builder.SearchSourceBuilder;
+import org.opensearch.searchrelevance.indices.SearchRelevanceIndices;
+import org.opensearch.searchrelevance.indices.SearchRelevanceIndicesManager;
 import org.opensearch.searchrelevance.model.RemoteSearchFailure;
-import org.opensearch.transport.client.Client;
 
 public class RemoteSearchFailureDaoTests extends org.apache.lucene.tests.util.LuceneTestCase {
 
     @Mock
-    private Client client;
+    private SearchRelevanceIndicesManager indicesManager;
 
     private RemoteSearchFailureDao failureDao;
 
@@ -45,7 +44,7 @@ public class RemoteSearchFailureDaoTests extends org.apache.lucene.tests.util.Lu
     public void setUp() throws Exception {
         super.setUp();
         MockitoAnnotations.openMocks(this);
-        failureDao = new RemoteSearchFailureDao(client);
+        failureDao = new RemoteSearchFailureDao(indicesManager);
     }
 
     public void testRecordFailure() throws InterruptedException {
@@ -66,11 +65,19 @@ public class RemoteSearchFailureDaoTests extends org.apache.lucene.tests.util.Lu
         IndexResponse mockResponse = mock(IndexResponse.class);
         when(mockResponse.getId()).thenReturn("failure-1");
 
+        // Stub indices manager upsert call
         doAnswer(invocation -> {
-            ActionListener<IndexResponse> listener = invocation.getArgument(1);
+            @SuppressWarnings("unchecked")
+            ActionListener<IndexResponse> listener = invocation.getArgument(3);
             listener.onResponse(mockResponse);
             return null;
-        }).when(client).index(any(IndexRequest.class), any(ActionListener.class));
+        }).when(indicesManager)
+            .updateDoc(
+                eq("failure-1"),
+                any(XContentBuilder.class),
+                eq(SearchRelevanceIndices.REMOTE_SEARCH_FAILURE),
+                any(ActionListener.class)
+            );
 
         // Test record operation
         CountDownLatch latch = new CountDownLatch(1);
@@ -95,26 +102,25 @@ public class RemoteSearchFailureDaoTests extends org.apache.lucene.tests.util.Lu
         assertNull(error.get());
         assertNotNull(result.get());
 
-        // Verify request details
-        ArgumentCaptor<IndexRequest> requestCaptor = ArgumentCaptor.forClass(IndexRequest.class);
-        verify(client).index(requestCaptor.capture(), any(ActionListener.class));
-
-        IndexRequest capturedRequest = requestCaptor.getValue();
-        assertEquals(PluginConstants.REMOTE_SEARCH_FAILURE_INDEX, capturedRequest.index());
-        assertEquals("failure-1", capturedRequest.id());
+        // Verify indices manager call
+        verify(indicesManager, times(1)).updateDoc(
+            eq("failure-1"),
+            any(XContentBuilder.class),
+            eq(SearchRelevanceIndices.REMOTE_SEARCH_FAILURE),
+            any(ActionListener.class)
+        );
     }
 
     public void testGetRecentFailures() throws InterruptedException {
         String configurationId = "config-1";
 
-        // Create search response with failure entries
+        // Prepare two real hits with source
         SearchHit hit1 = new SearchHit(1, "failure-1", Map.of(), Map.of());
         hit1.sourceRef(
             new BytesArray(
                 "{\"id\":\"failure-1\",\"remoteConfigId\":\"config-1\",\"errorType\":\"CONNECTION_TIMEOUT\",\"errorMessage\":\"Timeout\",\"timestamp\":\"2023-01-01T00:00:00Z\",\"status\":\"FAILED\"}"
             )
         );
-
         SearchHit hit2 = new SearchHit(2, "failure-2", Map.of(), Map.of());
         hit2.sourceRef(
             new BytesArray(
@@ -127,11 +133,18 @@ public class RemoteSearchFailureDaoTests extends org.apache.lucene.tests.util.Lu
         SearchResponse mockResponse = mock(SearchResponse.class);
         when(mockResponse.getHits()).thenReturn(searchHits);
 
+        // Stub list docs call
         doAnswer(invocation -> {
-            ActionListener<SearchResponse> listener = invocation.getArgument(1);
+            @SuppressWarnings("unchecked")
+            ActionListener<SearchResponse> listener = invocation.getArgument(2);
             listener.onResponse(mockResponse);
             return null;
-        }).when(client).search(any(SearchRequest.class), any(ActionListener.class));
+        }).when(indicesManager)
+            .listDocsBySearchRequest(
+                any(SearchSourceBuilder.class),
+                eq(SearchRelevanceIndices.REMOTE_SEARCH_FAILURE),
+                any(ActionListener.class)
+            );
 
         // Test get recent failures
         CountDownLatch latch = new CountDownLatch(1);
@@ -157,27 +170,36 @@ public class RemoteSearchFailureDaoTests extends org.apache.lucene.tests.util.Lu
         assertNotNull(result.get());
         assertEquals(2, result.get().size());
 
-        // Verify search request
-        verify(client, times(1)).search(any(SearchRequest.class), any(ActionListener.class));
+        // Verify call
+        verify(indicesManager, times(1)).listDocsBySearchRequest(
+            any(SearchSourceBuilder.class),
+            eq(SearchRelevanceIndices.REMOTE_SEARCH_FAILURE),
+            any(ActionListener.class)
+        );
     }
 
     public void testGetFailureStats() throws InterruptedException {
         String configurationId = "config-1";
         int hours = 24;
 
-        // Create search response with aggregations
+        // Create search response with total hits = 10
         SearchHits searchHits = new SearchHits(new SearchHit[0], new TotalHits(10L, TotalHits.Relation.EQUAL_TO), 1.0f);
         SearchResponse mockResponse = mock(SearchResponse.class);
         when(mockResponse.getHits()).thenReturn(searchHits);
-
-        // Create proper aggregations mock - return null to avoid internal implementation issues
         when(mockResponse.getAggregations()).thenReturn(null);
 
+        // Stub list docs call
         doAnswer(invocation -> {
-            ActionListener<SearchResponse> listener = invocation.getArgument(1);
+            @SuppressWarnings("unchecked")
+            ActionListener<SearchResponse> listener = invocation.getArgument(2);
             listener.onResponse(mockResponse);
             return null;
-        }).when(client).search(any(SearchRequest.class), any(ActionListener.class));
+        }).when(indicesManager)
+            .listDocsBySearchRequest(
+                any(SearchSourceBuilder.class),
+                eq(SearchRelevanceIndices.REMOTE_SEARCH_FAILURE),
+                any(ActionListener.class)
+            );
 
         // Test get failure stats
         CountDownLatch latch = new CountDownLatch(1);
@@ -216,16 +238,22 @@ public class RemoteSearchFailureDaoTests extends org.apache.lucene.tests.util.Lu
         int timeWindowMinutes = 30;
 
         // Create search response indicating excessive failures
-        SearchHits searchHits = new SearchHits(new SearchHit[0], new TotalHits(7L, TotalHits.Relation.EQUAL_TO), 1.0f); // More than
-                                                                                                                        // maxFailures
+        SearchHits searchHits = new SearchHits(new SearchHit[0], new TotalHits(7L, TotalHits.Relation.EQUAL_TO), 1.0f);
         SearchResponse mockResponse = mock(SearchResponse.class);
         when(mockResponse.getHits()).thenReturn(searchHits);
 
+        // Stub list docs call
         doAnswer(invocation -> {
-            ActionListener<SearchResponse> listener = invocation.getArgument(1);
+            @SuppressWarnings("unchecked")
+            ActionListener<SearchResponse> listener = invocation.getArgument(2);
             listener.onResponse(mockResponse);
             return null;
-        }).when(client).search(any(SearchRequest.class), any(ActionListener.class));
+        }).when(indicesManager)
+            .listDocsBySearchRequest(
+                any(SearchSourceBuilder.class),
+                eq(SearchRelevanceIndices.REMOTE_SEARCH_FAILURE),
+                any(ActionListener.class)
+            );
 
         // Test excessive failures check
         CountDownLatch latch = new CountDownLatch(1);
@@ -258,16 +286,22 @@ public class RemoteSearchFailureDaoTests extends org.apache.lucene.tests.util.Lu
         int timeWindowMinutes = 30;
 
         // Create search response indicating failures within limit
-        SearchHits searchHits = new SearchHits(new SearchHit[0], new TotalHits(3L, TotalHits.Relation.EQUAL_TO), 1.0f); // Less than
-                                                                                                                        // maxFailures
+        SearchHits searchHits = new SearchHits(new SearchHit[0], new TotalHits(3L, TotalHits.Relation.EQUAL_TO), 1.0f);
         SearchResponse mockResponse = mock(SearchResponse.class);
         when(mockResponse.getHits()).thenReturn(searchHits);
 
+        // Stub list docs call
         doAnswer(invocation -> {
-            ActionListener<SearchResponse> listener = invocation.getArgument(1);
+            @SuppressWarnings("unchecked")
+            ActionListener<SearchResponse> listener = invocation.getArgument(2);
             listener.onResponse(mockResponse);
             return null;
-        }).when(client).search(any(SearchRequest.class), any(ActionListener.class));
+        }).when(indicesManager)
+            .listDocsBySearchRequest(
+                any(SearchSourceBuilder.class),
+                eq(SearchRelevanceIndices.REMOTE_SEARCH_FAILURE),
+                any(ActionListener.class)
+            );
 
         // Test excessive failures check
         CountDownLatch latch = new CountDownLatch(1);
@@ -305,11 +339,18 @@ public class RemoteSearchFailureDaoTests extends org.apache.lucene.tests.util.Lu
         SearchResponse mockResponse = mock(SearchResponse.class);
         when(mockResponse.getHits()).thenReturn(searchHits);
 
+        // Stub list docs call
         doAnswer(invocation -> {
-            ActionListener<SearchResponse> listener = invocation.getArgument(1);
+            @SuppressWarnings("unchecked")
+            ActionListener<SearchResponse> listener = invocation.getArgument(2);
             listener.onResponse(mockResponse);
             return null;
-        }).when(client).search(any(SearchRequest.class), any(ActionListener.class));
+        }).when(indicesManager)
+            .listDocsBySearchRequest(
+                any(SearchSourceBuilder.class),
+                eq(SearchRelevanceIndices.REMOTE_SEARCH_FAILURE),
+                any(ActionListener.class)
+            );
 
         // Test cleanup operation
         CountDownLatch latch = new CountDownLatch(1);
@@ -344,15 +385,20 @@ public class RemoteSearchFailureDaoTests extends org.apache.lucene.tests.util.Lu
         SearchHits searchHits = new SearchHits(new SearchHit[0], new TotalHits(15L, TotalHits.Relation.EQUAL_TO), 1.0f);
         SearchResponse mockResponse = mock(SearchResponse.class);
         when(mockResponse.getHits()).thenReturn(searchHits);
-
-        // Create proper aggregations mock - return null to avoid internal implementation issues
         when(mockResponse.getAggregations()).thenReturn(null);
 
+        // Stub list docs call
         doAnswer(invocation -> {
-            ActionListener<SearchResponse> listener = invocation.getArgument(1);
+            @SuppressWarnings("unchecked")
+            ActionListener<SearchResponse> listener = invocation.getArgument(2);
             listener.onResponse(mockResponse);
             return null;
-        }).when(client).search(any(SearchRequest.class), any(ActionListener.class));
+        }).when(indicesManager)
+            .listDocsBySearchRequest(
+                any(SearchSourceBuilder.class),
+                eq(SearchRelevanceIndices.REMOTE_SEARCH_FAILURE),
+                any(ActionListener.class)
+            );
 
         // Test get error patterns
         CountDownLatch latch = new CountDownLatch(1);
@@ -392,15 +438,20 @@ public class RemoteSearchFailureDaoTests extends org.apache.lucene.tests.util.Lu
         SearchHits searchHits = new SearchHits(new SearchHit[0], new TotalHits(25L, TotalHits.Relation.EQUAL_TO), 1.0f);
         SearchResponse mockResponse = mock(SearchResponse.class);
         when(mockResponse.getHits()).thenReturn(searchHits);
-
-        // Create proper aggregations mock - return null to avoid internal implementation issues
         when(mockResponse.getAggregations()).thenReturn(null);
 
+        // Stub list docs call
         doAnswer(invocation -> {
-            ActionListener<SearchResponse> listener = invocation.getArgument(1);
+            @SuppressWarnings("unchecked")
+            ActionListener<SearchResponse> listener = invocation.getArgument(2);
             listener.onResponse(mockResponse);
             return null;
-        }).when(client).search(any(SearchRequest.class), any(ActionListener.class));
+        }).when(indicesManager)
+            .listDocsBySearchRequest(
+                any(SearchSourceBuilder.class),
+                eq(SearchRelevanceIndices.REMOTE_SEARCH_FAILURE),
+                any(ActionListener.class)
+            );
 
         // Test get error patterns for all configurations (null configurationId)
         CountDownLatch latch = new CountDownLatch(1);
@@ -431,12 +482,5 @@ public class RemoteSearchFailureDaoTests extends org.apache.lucene.tests.util.Lu
         assertEquals(25L, result.get().get("total_failures"));
         assertEquals(days, result.get().get("analysis_period_days"));
         assertNull(result.get().get("configuration_id")); // Should be null for all configurations
-    }
-
-    private SearchHit createMockSearchHit(String id) {
-        SearchHit hit = mock(SearchHit.class);
-        when(hit.getId()).thenReturn(id);
-        when(hit.getIndex()).thenReturn(PluginConstants.REMOTE_SEARCH_FAILURE_INDEX);
-        return hit;
     }
 }

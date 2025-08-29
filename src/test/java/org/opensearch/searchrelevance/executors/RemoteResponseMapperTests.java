@@ -356,6 +356,115 @@ public class RemoteResponseMapperTests extends org.apache.lucene.tests.util.Luce
         assertEquals("Error type should be remote_mapping_exception", "remote_mapping_exception", error.get("type"));
     }
 
+    public void testMapResponseSolrFormat() throws Exception {
+        String solrResponse = """
+            {
+              "responseHeader": {"QTime": 7},
+              "response": {
+                "numFound": 2,
+                "start": 0,
+                "docs": [
+                  {"id": "A1", "title": "Doc A", "score": 1.23},
+                  {"title": "Doc B"}
+                ]
+              }
+            }
+            """;
+
+        String result = mapper.mapResponse(solrResponse, null);
+        assertNotNull("Result should not be null", result);
+
+        Map<String, Object> parsed = parseJson(result);
+        assertTrue("Should contain hits", parsed.containsKey("hits"));
+        assertTrue("Should contain took", parsed.containsKey("took"));
+        assertEquals("Took should map from QTime", 7, parsed.get("took"));
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> hits = (Map<String, Object>) parsed.get("hits");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> total = (Map<String, Object>) hits.get("total");
+        assertEquals("Total should equal numFound", 2, total.get("value"));
+
+        @SuppressWarnings("unchecked")
+        java.util.List<Object> hitsList = (java.util.List<Object>) hits.get("hits");
+        assertEquals("Should have 2 hits", 2, hitsList.size());
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> firstHit = (Map<String, Object>) hitsList.get(0);
+        assertEquals("First hit ID should be A1", "A1", firstHit.get("_id"));
+        assertEquals("First hit score should be 1.23", 1.23, firstHit.get("_score"));
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> secondHit = (Map<String, Object>) hitsList.get(1);
+        // When id is missing, fallback to ordinal index string ("1")
+        assertEquals("Second hit ID should fallback to index string", "1", secondHit.get("_id"));
+        // Score should fallback to 1.0 when missing
+        assertEquals("Second hit score should fallback to 1.0", 1.0, secondHit.get("_score"));
+    }
+
+    public void testMapResponseWithTemplateArrayInsertion() throws Exception {
+        String remoteResponse = """
+            {
+                "data": {
+                    "items": [
+                        {"id": "1", "title": "A"},
+                        {"id": "2", "title": "B"}
+                    ]
+                }
+            }
+            """;
+
+        String template = """
+            {
+                "items": ${data.items}
+            }
+            """;
+
+        String result = mapper.mapResponse(remoteResponse, template);
+        assertNotNull("Result should not be null", result);
+
+        Map<String, Object> parsed = parseJson(result);
+        assertTrue("Result should contain items", parsed.containsKey("items"));
+
+        @SuppressWarnings("unchecked")
+        java.util.List<Object> items = (java.util.List<Object>) parsed.get("items");
+        assertEquals("Should have 2 items", 2, items.size());
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> first = (Map<String, Object>) items.get(0);
+        assertEquals("First item id should be 1", "1", first.get("id"));
+    }
+
+    public void testMapResponseWithTemplateObjectInsertion() throws Exception {
+        String remoteResponse = """
+            {
+                "meta": {
+                    "stats": {
+                        "count": 5,
+                        "ok": true
+                    }
+                }
+            }
+            """;
+
+        String template = """
+            {
+                "stats": ${meta.stats}
+            }
+            """;
+
+        String result = mapper.mapResponse(remoteResponse, template);
+        assertNotNull("Result should not be null", result);
+
+        Map<String, Object> parsed = parseJson(result);
+        assertTrue("Result should contain stats", parsed.containsKey("stats"));
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> stats = (Map<String, Object>) parsed.get("stats");
+        assertEquals("Count should be 5", 5, stats.get("count"));
+        assertEquals("Ok should be true", true, stats.get("ok"));
+    }
+
     /**
      * Helper method to parse JSON string to Map
      */

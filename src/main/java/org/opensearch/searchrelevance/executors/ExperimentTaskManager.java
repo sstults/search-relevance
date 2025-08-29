@@ -66,11 +66,13 @@ public class ExperimentTaskManager {
 
     // Services
     private final Client client;
-    private final EvaluationResultDao evaluationResultDao;
     private final ExperimentVariantDao experimentVariantDao;
     private final ThreadPool threadPool;
     private final SearchResponseProcessor searchResponseProcessor;
-    private final RemoteSearchExecutor remoteSearchExecutor;
+    private final RemoteSearchConfigurationDao remoteSearchConfigurationDao;
+    private final RemoteSearchCacheDao remoteSearchCacheDao;
+    private final RemoteSearchFailureDao remoteSearchFailureDao;
+    private volatile RemoteSearchExecutor remoteSearchExecutor;
 
     @Inject
     public ExperimentTaskManager(
@@ -83,19 +85,15 @@ public class ExperimentTaskManager {
         RemoteSearchFailureDao remoteSearchFailureDao
     ) {
         this.client = client;
-        this.evaluationResultDao = evaluationResultDao;
         this.experimentVariantDao = experimentVariantDao;
         this.threadPool = threadPool;
         this.searchResponseProcessor = new SearchResponseProcessor(evaluationResultDao, experimentVariantDao);
 
-        // Initialize RemoteSearchExecutor with dependencies
-        RemoteResponseMapper remoteResponseMapper = new RemoteResponseMapper();
-        this.remoteSearchExecutor = new RemoteSearchExecutor(
-            remoteSearchConfigurationDao,
-            remoteSearchCacheDao,
-            remoteSearchFailureDao,
-            remoteResponseMapper
-        );
+        // Store DAOs; lazily initialize RemoteSearchExecutor to avoid HttpClient threads in non-remote tests
+        this.remoteSearchConfigurationDao = remoteSearchConfigurationDao;
+        this.remoteSearchCacheDao = remoteSearchCacheDao;
+        this.remoteSearchFailureDao = remoteSearchFailureDao;
+        this.remoteSearchExecutor = null;
 
         this.maxConcurrentTasks = Math.max(2, Math.min(DEFAULT_MIN_CONCURRENT_THREADS, ALLOCATED_PROCESSORS / PROCESSOR_NUMBER_DIVISOR));
         this.concurrencyControl = new Semaphore(maxConcurrentTasks, true);
@@ -391,11 +389,26 @@ public class ExperimentTaskManager {
      * Execute remote search variant using RemoteSearchExecutor
      */
     private void executeRemoteSearchVariantAsync(RemoteSearchTaskParameters params, String evaluationId, CompletableFuture<Void> future) {
+        // Lazy initialize RemoteSearchExecutor to prevent HttpClient selector threads when not used
+        if (remoteSearchExecutor == null) {
+            synchronized (this) {
+                if (remoteSearchExecutor == null) {
+                    remoteSearchExecutor = new RemoteSearchExecutor(
+                        remoteSearchConfigurationDao,
+                        remoteSearchCacheDao,
+                        remoteSearchFailureDao,
+                        new RemoteResponseMapper()
+                    );
+                }
+            }
+        }
+
         // Execute remote search request
         remoteSearchExecutor.executeRemoteSearch(
             params.getRemoteConfigId(),
             params.getQuery(),
             params.getQueryText(),
+            params.getSize(),
             params.getExperimentId(),
             new ActionListener<RemoteSearchExecutor.RemoteSearchResponse>() {
                 @Override
@@ -435,18 +448,11 @@ public class ExperimentTaskManager {
         );
     }
 
-    /**
-     * Process remote search response and integrate with evaluation metrics
-     */
     private void processRemoteSearchResponse(
         RemoteSearchExecutor.RemoteSearchResponse remoteResponse,
         RemoteSearchTaskParameters params,
         String evaluationId
     ) {
-        // For now, we'll create a simplified processing approach
-        // In a full implementation, this would convert the remote response to OpenSearch format
-        // and use the existing searchResponseProcessor
-
         log.info(
             "Processing remote search response for experiment: {}, variant: {}, evaluation: {}",
             params.getExperimentId(),
@@ -454,18 +460,79 @@ public class ExperimentTaskManager {
             evaluationId
         );
 
-        // TODO: Implement full remote response processing
-        // This would involve:
-        // 1. Parsing the mapped response from remoteResponse.getMappedResponse()
-        // 2. Converting it to OpenSearch SearchResponse format
-        // 3. Using searchResponseProcessor.processSearchResponse() for evaluation
+        try {
+            // Prefer mapped response if available, otherwise use raw response
+            String json = remoteResponse.getMappedResponse();
+            if (json == null || json.trim().isEmpty()) {
+                json = remoteResponse.getRawResponse();
+            }
+            if (json == null || json.trim().isEmpty()) {
+                throw new IllegalArgumentException("Remote response is empty");
+            }
 
-        // For now, we'll just log the successful execution
-        log.debug(
-            "Remote search completed successfully for config: {}, status: {}",
-            params.getRemoteConfigId(),
-            remoteResponse.getStatusCode()
-        );
+            // Parse JSON into Map<String, Object>
+            String cleanJson = json.replaceAll("\\s+", " ").trim();
+            java.util.Map<String, Object> data;
+            try (
+                org.opensearch.core.xcontent.XContentParser parser = org.opensearch.common.xcontent.XContentFactory.jsonBuilder()
+                    .contentType()
+                    .xContent()
+                    .createParser(null, null, cleanJson)
+            ) {
+                data = parser.map();
+            }
+
+            // Extract hits.hits array
+            Object hitsObj = data.get("hits");
+            if (!(hitsObj instanceof java.util.Map)) {
+                throw new IllegalArgumentException("Mapped response missing 'hits' object");
+            }
+            @SuppressWarnings("unchecked")
+            java.util.Map<String, Object> hitsContainer = (java.util.Map<String, Object>) hitsObj;
+
+            Object hitsListObj = hitsContainer.get("hits");
+            if (!(hitsListObj instanceof java.util.List)) {
+                throw new IllegalArgumentException("Mapped response missing 'hits.hits' array");
+            }
+            @SuppressWarnings("unchecked")
+            java.util.List<Object> hitsList = (java.util.List<Object>) hitsListObj;
+
+            // Collect document IDs from hits
+            java.util.List<String> docIds = new java.util.ArrayList<>();
+            for (int i = 0; i < hitsList.size(); i++) {
+                Object item = hitsList.get(i);
+                if (item instanceof java.util.Map) {
+                    @SuppressWarnings("unchecked")
+                    java.util.Map<String, Object> hitMap = (java.util.Map<String, Object>) item;
+                    Object idObj = hitMap.get("_id");
+                    String id = idObj != null ? idObj.toString() : String.valueOf(i);
+                    docIds.add(id);
+                }
+            }
+
+            // Delegate to SearchResponseProcessor using doc IDs
+            searchResponseProcessor.processDocIds(
+                docIds,
+                params.getExperimentVariant(),
+                params.getExperimentId(),
+                params.getSearchConfigId(),
+                params.getQueryText(),
+                params.getSize(),
+                params.getJudgmentIds(),
+                params.getDocIdToScores(),
+                evaluationId,
+                params.getTaskContext()
+            );
+
+            log.debug(
+                "Remote search processed for config: {}, status: {}, total docIds: {}",
+                params.getRemoteConfigId(),
+                remoteResponse.getStatusCode(),
+                docIds.size()
+            );
+        } catch (Exception e) {
+            handleSearchFailure(e, params.getExperimentVariant(), params.getExperimentId(), evaluationId, params.getTaskContext());
+        }
     }
 
     /**

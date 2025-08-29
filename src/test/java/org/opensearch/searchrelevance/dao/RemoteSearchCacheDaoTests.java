@@ -8,7 +8,7 @@
 package org.opensearch.searchrelevance.dao;
 
 import static org.junit.Assert.*;
-import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 import java.time.Instant;
@@ -19,28 +19,25 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.apache.lucene.search.TotalHits;
-import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
-import org.opensearch.action.delete.DeleteRequest;
 import org.opensearch.action.delete.DeleteResponse;
-import org.opensearch.action.get.GetRequest;
-import org.opensearch.action.get.GetResponse;
-import org.opensearch.action.index.IndexRequest;
 import org.opensearch.action.index.IndexResponse;
-import org.opensearch.action.search.SearchRequest;
 import org.opensearch.action.search.SearchResponse;
 import org.opensearch.core.action.ActionListener;
+import org.opensearch.core.common.bytes.BytesArray;
+import org.opensearch.core.xcontent.XContentBuilder;
 import org.opensearch.search.SearchHit;
 import org.opensearch.search.SearchHits;
-import org.opensearch.searchrelevance.common.PluginConstants;
+import org.opensearch.search.builder.SearchSourceBuilder;
+import org.opensearch.searchrelevance.indices.SearchRelevanceIndices;
+import org.opensearch.searchrelevance.indices.SearchRelevanceIndicesManager;
 import org.opensearch.searchrelevance.model.RemoteSearchCache;
-import org.opensearch.transport.client.Client;
 
 public class RemoteSearchCacheDaoTests extends org.apache.lucene.tests.util.LuceneTestCase {
 
     @Mock
-    private Client client;
+    private SearchRelevanceIndicesManager indicesManager;
 
     private RemoteSearchCacheDao cacheDao;
 
@@ -48,7 +45,7 @@ public class RemoteSearchCacheDaoTests extends org.apache.lucene.tests.util.Luce
     public void setUp() throws Exception {
         super.setUp();
         MockitoAnnotations.openMocks(this);
-        cacheDao = new RemoteSearchCacheDao(client);
+        cacheDao = new RemoteSearchCacheDao(indicesManager);
     }
 
     public void testStoreCache() throws InterruptedException {
@@ -68,15 +65,19 @@ public class RemoteSearchCacheDaoTests extends org.apache.lucene.tests.util.Luce
         IndexResponse mockResponse = mock(IndexResponse.class);
         when(mockResponse.getId()).thenReturn("test-cache-id");
 
-        // Capture the index request
-        ArgumentCaptor<IndexRequest> requestCaptor = ArgumentCaptor.forClass(IndexRequest.class);
-        ArgumentCaptor<ActionListener<IndexResponse>> listenerCaptor = ArgumentCaptor.forClass(ActionListener.class);
-
+        // Stub indices manager update call
         doAnswer(invocation -> {
-            ActionListener<IndexResponse> listener = invocation.getArgument(1);
+            @SuppressWarnings("unchecked")
+            ActionListener<IndexResponse> listener = invocation.getArgument(3);
             listener.onResponse(mockResponse);
             return null;
-        }).when(client).index(requestCaptor.capture(), listenerCaptor.capture());
+        }).when(indicesManager)
+            .updateDocEfficient(
+                eq("test-cache-id"),
+                any(XContentBuilder.class),
+                eq(SearchRelevanceIndices.REMOTE_SEARCH_CACHE),
+                any(ActionListener.class)
+            );
 
         // Test store operation
         CountDownLatch latch = new CountDownLatch(1);
@@ -101,10 +102,13 @@ public class RemoteSearchCacheDaoTests extends org.apache.lucene.tests.util.Luce
         assertNull(error.get());
         assertNotNull(result.get());
 
-        // Verify request details
-        IndexRequest capturedRequest = requestCaptor.getValue();
-        assertEquals(PluginConstants.REMOTE_SEARCH_CACHE_INDEX, capturedRequest.index());
-        assertEquals("test-cache-id", capturedRequest.id());
+        // Verify indices manager was called with correct arguments
+        verify(indicesManager, times(1)).updateDocEfficient(
+            eq("test-cache-id"),
+            any(XContentBuilder.class),
+            eq(SearchRelevanceIndices.REMOTE_SEARCH_CACHE),
+            any(ActionListener.class)
+        );
     }
 
     public void testGetCacheHit() throws InterruptedException {
@@ -130,16 +134,27 @@ public class RemoteSearchCacheDaoTests extends org.apache.lucene.tests.util.Luce
             Instant.now().toEpochMilli() + (60L * 60 * 1000)
         );
 
-        // Mock successful get response
-        GetResponse mockResponse = mock(GetResponse.class);
-        when(mockResponse.isExists()).thenReturn(true);
-        when(mockResponse.getSourceAsMap()).thenReturn(sourceMap);
+        // Prepare SearchResponse with one real hit
+        String json = "{\"cacheKey\":\""
+            + cacheKey
+            + "\",\"remoteConfigId\":\"config-1\",\"query\":\"query-hash\",\"queryText\":\"test query\",\"cachedResponse\":\"{\\\"response\\\": \\\"data\\\"}\",\"mappedResponse\":\"{\\\"mapped\\\": \\\"response\\\"}\",\"cacheTimestamp\":"
+            + sourceMap.get(RemoteSearchCache.TIMESTAMP_FIELD)
+            + ",\"expirationTimestamp\":"
+            + sourceMap.get(RemoteSearchCache.EXPIRATION_TIMESTAMP)
+            + "}";
+        SearchHit hit = new SearchHit(1, cacheKey, Map.of(), Map.of());
+        hit.sourceRef(new BytesArray(json));
+        SearchHits searchHits = new SearchHits(new SearchHit[] { hit }, new TotalHits(1, TotalHits.Relation.EQUAL_TO), 1.0f);
+        SearchResponse mockResponse = mock(SearchResponse.class);
+        when(mockResponse.getHits()).thenReturn(searchHits);
 
+        // Stub indices manager get by id
         doAnswer(invocation -> {
-            ActionListener<GetResponse> listener = invocation.getArgument(1);
+            @SuppressWarnings("unchecked")
+            ActionListener<SearchResponse> listener = invocation.getArgument(2);
             listener.onResponse(mockResponse);
             return null;
-        }).when(client).get(any(GetRequest.class), any(ActionListener.class));
+        }).when(indicesManager).getDocByDocId(eq(cacheKey), eq(SearchRelevanceIndices.REMOTE_SEARCH_CACHE), any(ActionListener.class));
 
         // Test get operation
         CountDownLatch latch = new CountDownLatch(1);
@@ -170,15 +185,18 @@ public class RemoteSearchCacheDaoTests extends org.apache.lucene.tests.util.Luce
     public void testGetCacheMiss() throws InterruptedException {
         String cacheKey = "non-existent-key";
 
-        // Mock cache miss response
-        GetResponse mockResponse = mock(GetResponse.class);
-        when(mockResponse.isExists()).thenReturn(false);
+        // Prepare mocked SearchResponse with zero hits
+        SearchHits searchHits = new SearchHits(new SearchHit[0], new TotalHits(0, TotalHits.Relation.EQUAL_TO), 1.0f);
+        SearchResponse mockResponse = mock(SearchResponse.class);
+        when(mockResponse.getHits()).thenReturn(searchHits);
 
+        // Stub indices manager get by id
         doAnswer(invocation -> {
-            ActionListener<GetResponse> listener = invocation.getArgument(1);
+            @SuppressWarnings("unchecked")
+            ActionListener<SearchResponse> listener = invocation.getArgument(2);
             listener.onResponse(mockResponse);
             return null;
-        }).when(client).get(any(GetRequest.class), any(ActionListener.class));
+        }).when(indicesManager).getDocByDocId(eq(cacheKey), eq(SearchRelevanceIndices.REMOTE_SEARCH_CACHE), any(ActionListener.class));
 
         // Test get operation
         CountDownLatch latch = new CountDownLatch(1);
@@ -229,25 +247,36 @@ public class RemoteSearchCacheDaoTests extends org.apache.lucene.tests.util.Luce
             expirationTime.toEpochMilli()
         );
 
-        // Mock get response for expired cache
-        GetResponse mockGetResponse = mock(GetResponse.class);
-        when(mockGetResponse.isExists()).thenReturn(true);
-        when(mockGetResponse.getSourceAsMap()).thenReturn(sourceMap);
+        // Search response with one expired real hit
+        String json = "{\"cacheKey\":\""
+            + cacheKey
+            + "\",\"remoteConfigId\":\"config-1\",\"query\":\"query-hash\",\"queryText\":\"test query\",\"cachedResponse\":\"{\\\"response\\\": \\\"data\\\"}\",\"mappedResponse\":\"{\\\"mapped\\\": \\\"response\\\"}\",\"cacheTimestamp\":"
+            + expiredTime.toEpochMilli()
+            + ",\"expirationTimestamp\":"
+            + expirationTime.toEpochMilli()
+            + "}";
+        SearchHit hit = new SearchHit(1, cacheKey, Map.of(), Map.of());
+        hit.sourceRef(new BytesArray(json));
+        SearchHits searchHits = new SearchHits(new SearchHit[] { hit }, new TotalHits(1, TotalHits.Relation.EQUAL_TO), 1.0f);
+        SearchResponse mockGetResponse = mock(SearchResponse.class);
+        when(mockGetResponse.getHits()).thenReturn(searchHits);
 
-        // Mock delete response for cleanup
-        DeleteResponse mockDeleteResponse = mock(DeleteResponse.class);
-
+        // Stub indices manager get by id
         doAnswer(invocation -> {
-            ActionListener<GetResponse> listener = invocation.getArgument(1);
+            @SuppressWarnings("unchecked")
+            ActionListener<SearchResponse> listener = invocation.getArgument(2);
             listener.onResponse(mockGetResponse);
             return null;
-        }).when(client).get(any(GetRequest.class), any(ActionListener.class));
+        }).when(indicesManager).getDocByDocId(eq(cacheKey), eq(SearchRelevanceIndices.REMOTE_SEARCH_CACHE), any(ActionListener.class));
 
+        // Stub delete call
+        DeleteResponse mockDeleteResponse = mock(DeleteResponse.class);
         doAnswer(invocation -> {
-            ActionListener<DeleteResponse> listener = invocation.getArgument(1);
+            @SuppressWarnings("unchecked")
+            ActionListener<DeleteResponse> listener = invocation.getArgument(2);
             listener.onResponse(mockDeleteResponse);
             return null;
-        }).when(client).delete(any(DeleteRequest.class), any(ActionListener.class));
+        }).when(indicesManager).deleteDocByDocId(eq(cacheKey), eq(SearchRelevanceIndices.REMOTE_SEARCH_CACHE), any(ActionListener.class));
 
         // Test get operation
         CountDownLatch latch = new CountDownLatch(1);
@@ -273,7 +302,11 @@ public class RemoteSearchCacheDaoTests extends org.apache.lucene.tests.util.Luce
         assertNull(result.get()); // Should be null for expired cache
 
         // Verify delete was called for cleanup
-        verify(client, times(1)).delete(any(DeleteRequest.class), any(ActionListener.class));
+        verify(indicesManager, times(1)).deleteDocByDocId(
+            eq(cacheKey),
+            eq(SearchRelevanceIndices.REMOTE_SEARCH_CACHE),
+            any(ActionListener.class)
+        );
     }
 
     public void testDeleteCache() throws InterruptedException {
@@ -282,11 +315,13 @@ public class RemoteSearchCacheDaoTests extends org.apache.lucene.tests.util.Luce
         // Mock successful delete response
         DeleteResponse mockResponse = mock(DeleteResponse.class);
 
+        // Stub indices manager delete call
         doAnswer(invocation -> {
-            ActionListener<DeleteResponse> listener = invocation.getArgument(1);
+            @SuppressWarnings("unchecked")
+            ActionListener<DeleteResponse> listener = invocation.getArgument(2);
             listener.onResponse(mockResponse);
             return null;
-        }).when(client).delete(any(DeleteRequest.class), any(ActionListener.class));
+        }).when(indicesManager).deleteDocByDocId(eq(cacheKey), eq(SearchRelevanceIndices.REMOTE_SEARCH_CACHE), any(ActionListener.class));
 
         // Test delete operation
         CountDownLatch latch = new CountDownLatch(1);
@@ -311,13 +346,12 @@ public class RemoteSearchCacheDaoTests extends org.apache.lucene.tests.util.Luce
         assertNull(error.get());
         assertNotNull(result.get());
 
-        // Verify delete request
-        ArgumentCaptor<DeleteRequest> requestCaptor = ArgumentCaptor.forClass(DeleteRequest.class);
-        verify(client).delete(requestCaptor.capture(), any(ActionListener.class));
-
-        DeleteRequest capturedRequest = requestCaptor.getValue();
-        assertEquals(PluginConstants.REMOTE_SEARCH_CACHE_INDEX, capturedRequest.index());
-        assertEquals(cacheKey, capturedRequest.id());
+        // Verify delete call
+        verify(indicesManager, times(1)).deleteDocByDocId(
+            eq(cacheKey),
+            eq(SearchRelevanceIndices.REMOTE_SEARCH_CACHE),
+            any(ActionListener.class)
+        );
     }
 
     public void testClearCacheForConfiguration() throws InterruptedException {
@@ -331,20 +365,27 @@ public class RemoteSearchCacheDaoTests extends org.apache.lucene.tests.util.Luce
         SearchResponse mockSearchResponse = mock(SearchResponse.class);
         when(mockSearchResponse.getHits()).thenReturn(searchHits);
 
-        // Mock delete responses
-        DeleteResponse mockDeleteResponse = mock(DeleteResponse.class);
-
+        // Stub list docs call
         doAnswer(invocation -> {
-            ActionListener<SearchResponse> listener = invocation.getArgument(1);
+            @SuppressWarnings("unchecked")
+            ActionListener<SearchResponse> listener = invocation.getArgument(2);
             listener.onResponse(mockSearchResponse);
             return null;
-        }).when(client).search(any(SearchRequest.class), any(ActionListener.class));
+        }).when(indicesManager)
+            .listDocsBySearchRequest(
+                any(SearchSourceBuilder.class),
+                eq(SearchRelevanceIndices.REMOTE_SEARCH_CACHE),
+                any(ActionListener.class)
+            );
 
+        // Stub delete responses
+        DeleteResponse mockDeleteResponse = mock(DeleteResponse.class);
         doAnswer(invocation -> {
-            ActionListener<DeleteResponse> listener = invocation.getArgument(1);
+            @SuppressWarnings("unchecked")
+            ActionListener<DeleteResponse> listener = invocation.getArgument(2);
             listener.onResponse(mockDeleteResponse);
             return null;
-        }).when(client).delete(any(DeleteRequest.class), any(ActionListener.class));
+        }).when(indicesManager).deleteDocByDocId(anyString(), eq(SearchRelevanceIndices.REMOTE_SEARCH_CACHE), any(ActionListener.class));
 
         // Test clear operation
         CountDownLatch latch = new CountDownLatch(1);
@@ -367,8 +408,16 @@ public class RemoteSearchCacheDaoTests extends org.apache.lucene.tests.util.Luce
         assertNull(error.get());
 
         // Verify search and delete calls
-        verify(client, times(1)).search(any(SearchRequest.class), any(ActionListener.class));
-        verify(client, times(2)).delete(any(DeleteRequest.class), any(ActionListener.class));
+        verify(indicesManager, times(1)).listDocsBySearchRequest(
+            any(SearchSourceBuilder.class),
+            eq(SearchRelevanceIndices.REMOTE_SEARCH_CACHE),
+            any(ActionListener.class)
+        );
+        verify(indicesManager, times(2)).deleteDocByDocId(
+            anyString(),
+            eq(SearchRelevanceIndices.REMOTE_SEARCH_CACHE),
+            any(ActionListener.class)
+        );
     }
 
     public void testGetCacheStats() throws InterruptedException {
@@ -376,15 +425,20 @@ public class RemoteSearchCacheDaoTests extends org.apache.lucene.tests.util.Luce
         SearchHits searchHits = new SearchHits(new SearchHit[0], new TotalHits(100L, TotalHits.Relation.EQUAL_TO), 1.0f);
         SearchResponse mockResponse = mock(SearchResponse.class);
         when(mockResponse.getHits()).thenReturn(searchHits);
-
-        // Create proper aggregations mock - return null to avoid internal implementation issues
         when(mockResponse.getAggregations()).thenReturn(null);
 
+        // Stub list docs call
         doAnswer(invocation -> {
-            ActionListener<SearchResponse> listener = invocation.getArgument(1);
+            @SuppressWarnings("unchecked")
+            ActionListener<SearchResponse> listener = invocation.getArgument(2);
             listener.onResponse(mockResponse);
             return null;
-        }).when(client).search(any(SearchRequest.class), any(ActionListener.class));
+        }).when(indicesManager)
+            .listDocsBySearchRequest(
+                any(SearchSourceBuilder.class),
+                eq(SearchRelevanceIndices.REMOTE_SEARCH_CACHE),
+                any(ActionListener.class)
+            );
 
         // Test stats operation
         CountDownLatch latch = new CountDownLatch(1);
@@ -410,12 +464,5 @@ public class RemoteSearchCacheDaoTests extends org.apache.lucene.tests.util.Luce
         assertNotNull(result.get());
         assertTrue(result.get().containsKey("total_entries"));
         assertTrue(result.get().containsKey("aggregations"));
-    }
-
-    private SearchHit createMockSearchHit(String id) {
-        SearchHit hit = mock(SearchHit.class);
-        when(hit.getId()).thenReturn(id);
-        when(hit.getIndex()).thenReturn(PluginConstants.REMOTE_SEARCH_CACHE_INDEX);
-        return hit;
     }
 }

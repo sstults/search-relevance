@@ -7,8 +7,6 @@
  */
 package org.opensearch.searchrelevance.dao;
 
-import static org.opensearch.searchrelevance.common.PluginConstants.REMOTE_SEARCH_CONFIG_INDEX;
-
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -16,13 +14,8 @@ import java.util.Map;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.opensearch.action.delete.DeleteRequest;
 import org.opensearch.action.delete.DeleteResponse;
-import org.opensearch.action.get.GetRequest;
-import org.opensearch.action.get.GetResponse;
-import org.opensearch.action.index.IndexRequest;
 import org.opensearch.action.index.IndexResponse;
-import org.opensearch.action.search.SearchRequest;
 import org.opensearch.action.search.SearchResponse;
 import org.opensearch.common.xcontent.XContentType;
 import org.opensearch.core.action.ActionListener;
@@ -30,8 +23,9 @@ import org.opensearch.core.xcontent.XContentBuilder;
 import org.opensearch.index.query.QueryBuilders;
 import org.opensearch.search.SearchHit;
 import org.opensearch.search.builder.SearchSourceBuilder;
+import org.opensearch.searchrelevance.indices.SearchRelevanceIndices;
+import org.opensearch.searchrelevance.indices.SearchRelevanceIndicesManager;
 import org.opensearch.searchrelevance.model.RemoteSearchConfiguration;
-import org.opensearch.transport.client.Client;
 
 /**
  * Data Access Object for RemoteSearchConfiguration operations.
@@ -40,10 +34,10 @@ import org.opensearch.transport.client.Client;
 public class RemoteSearchConfigurationDao {
     private static final Logger log = LogManager.getLogger(RemoteSearchConfigurationDao.class);
 
-    private final Client client;
+    private final SearchRelevanceIndicesManager searchRelevanceIndicesManager;
 
-    public RemoteSearchConfigurationDao(Client client) {
-        this.client = client;
+    public RemoteSearchConfigurationDao(SearchRelevanceIndicesManager searchRelevanceIndicesManager) {
+        this.searchRelevanceIndicesManager = searchRelevanceIndicesManager;
     }
 
     /**
@@ -52,11 +46,13 @@ public class RemoteSearchConfigurationDao {
     public void createRemoteSearchConfiguration(RemoteSearchConfiguration configuration, ActionListener<IndexResponse> listener) {
         try {
             XContentBuilder builder = configuration.toXContent(XContentBuilder.builder(XContentType.JSON.xContent()), null);
-            IndexRequest indexRequest = new IndexRequest(REMOTE_SEARCH_CONFIG_INDEX).id(configuration.getId())
-                .source(builder)
-                .setRefreshPolicy("immediate");
-
-            client.index(indexRequest, listener);
+            // Use indices manager to ensure index exists and upsert the doc
+            searchRelevanceIndicesManager.updateDocEfficient(
+                configuration.getId(),
+                builder,
+                SearchRelevanceIndices.REMOTE_SEARCH_CONFIGURATION,
+                listener
+            );
         } catch (IOException e) {
             log.error("Failed to create remote search configuration", e);
             listener.onFailure(e);
@@ -67,75 +63,76 @@ public class RemoteSearchConfigurationDao {
      * Get a remote search configuration by ID
      */
     public void getRemoteSearchConfiguration(String id, ActionListener<RemoteSearchConfiguration> listener) {
-        GetRequest getRequest = new GetRequest(REMOTE_SEARCH_CONFIG_INDEX, id);
-
-        client.get(getRequest, new ActionListener<GetResponse>() {
-            @Override
-            public void onResponse(GetResponse getResponse) {
-                if (!getResponse.isExists()) {
-                    listener.onResponse(null);
-                    return;
+        searchRelevanceIndicesManager.getDocByDocId(
+            id,
+            SearchRelevanceIndices.REMOTE_SEARCH_CONFIGURATION,
+            new ActionListener<SearchResponse>() {
+                @Override
+                public void onResponse(SearchResponse response) {
+                    try {
+                        if (response.getHits().getTotalHits().value() == 0) {
+                            listener.onResponse(null);
+                            return;
+                        }
+                        RemoteSearchConfiguration configuration = parseRemoteSearchConfiguration(
+                            response.getHits().getAt(0).getSourceAsMap()
+                        );
+                        listener.onResponse(configuration);
+                    } catch (Exception e) {
+                        log.error("Failed to parse remote search configuration", e);
+                        listener.onFailure(e);
+                    }
                 }
 
-                try {
-                    RemoteSearchConfiguration configuration = parseRemoteSearchConfiguration(getResponse.getSourceAsMap());
-                    listener.onResponse(configuration);
-                } catch (Exception e) {
-                    log.error("Failed to parse remote search configuration", e);
+                @Override
+                public void onFailure(Exception e) {
+                    log.error("Failed to get remote search configuration", e);
                     listener.onFailure(e);
                 }
             }
-
-            @Override
-            public void onFailure(Exception e) {
-                log.error("Failed to get remote search configuration", e);
-                listener.onFailure(e);
-            }
-        });
+        );
     }
 
     /**
      * List all remote search configurations
      */
     public void listRemoteSearchConfigurations(ActionListener<List<RemoteSearchConfiguration>> listener) {
-        SearchRequest searchRequest = new SearchRequest(REMOTE_SEARCH_CONFIG_INDEX);
-        SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder();
-        searchSourceBuilder.query(QueryBuilders.matchAllQuery());
-        searchSourceBuilder.size(1000); // TODO: Add pagination support
-        searchRequest.source(searchSourceBuilder);
+        SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder().query(QueryBuilders.matchAllQuery()).size(1000); // TODO:
+                                                                                                                             // pagination
 
-        client.search(searchRequest, new ActionListener<SearchResponse>() {
-            @Override
-            public void onResponse(SearchResponse searchResponse) {
-                try {
-                    List<RemoteSearchConfiguration> configurations = new ArrayList<>();
-                    for (SearchHit hit : searchResponse.getHits().getHits()) {
-                        RemoteSearchConfiguration configuration = parseRemoteSearchConfiguration(hit.getSourceAsMap());
-                        configurations.add(configuration);
+        searchRelevanceIndicesManager.listDocsBySearchRequest(
+            searchSourceBuilder,
+            SearchRelevanceIndices.REMOTE_SEARCH_CONFIGURATION,
+            new ActionListener<SearchResponse>() {
+                @Override
+                public void onResponse(SearchResponse searchResponse) {
+                    try {
+                        List<RemoteSearchConfiguration> configurations = new ArrayList<>();
+                        for (SearchHit hit : searchResponse.getHits().getHits()) {
+                            RemoteSearchConfiguration configuration = parseRemoteSearchConfiguration(hit.getSourceAsMap());
+                            configurations.add(configuration);
+                        }
+                        listener.onResponse(configurations);
+                    } catch (Exception e) {
+                        log.error("Failed to parse remote search configurations", e);
+                        listener.onFailure(e);
                     }
-                    listener.onResponse(configurations);
-                } catch (Exception e) {
-                    log.error("Failed to parse remote search configurations", e);
+                }
+
+                @Override
+                public void onFailure(Exception e) {
+                    log.error("Failed to list remote search configurations", e);
                     listener.onFailure(e);
                 }
             }
-
-            @Override
-            public void onFailure(Exception e) {
-                log.error("Failed to list remote search configurations", e);
-                listener.onFailure(e);
-            }
-        });
+        );
     }
 
     /**
      * Delete a remote search configuration
      */
     public void deleteRemoteSearchConfiguration(String id, ActionListener<DeleteResponse> listener) {
-        DeleteRequest deleteRequest = new DeleteRequest(REMOTE_SEARCH_CONFIG_INDEX, id);
-        deleteRequest.setRefreshPolicy("immediate");
-
-        client.delete(deleteRequest, listener);
+        searchRelevanceIndicesManager.deleteDocByDocId(id, SearchRelevanceIndices.REMOTE_SEARCH_CONFIGURATION, listener);
     }
 
     /**
