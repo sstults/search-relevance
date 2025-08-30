@@ -150,6 +150,7 @@ public class PutExperimentTransportAction extends HandledTransportAction<PutExpe
                     // Then get SearchConfigurations asynchronously
                     fetchSearchConfigurationsAsync(experimentId, request, queryTextWithReferences);
                 }
+
             } catch (Exception e) {
                 handleAsyncFailure(experimentId, request, "Failed to process QuerySet", e);
             }
