@@ -12,6 +12,7 @@ Inspired from [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ### Enhancements
 - Optimize Rank-Biased Overlap (RBO) calculation from O(n²) to O(n) by maintaining prefix sets incrementally ([#499](https://github.com/opensearch-project/search-relevance/issues/499))
+- Optimize Frequency Weighted similarity calculation by replacing the O(n²) `listB.contains` scan with HashSet membership and single-pass union/intersection accumulation ([#502](https://github.com/opensearch-project/search-relevance/pull/502))
 
 ### Bug Fixes
 - Implement referential integrity validation for search configurations, experiments, and judgments ([#360](https://github.com/opensearch-project/search-relevance/pull/360))

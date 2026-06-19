@@ -98,10 +98,12 @@ public class PairComparison {
     public static double calculateFrequencyWeightedSimilarity(List<String> listA, List<String> listB) {
         Map<String, Double> weights = calculateCombinedWeights(listA, listB);
 
-        // Calculate intersection weight
+        // Calculate intersection weight. Use a HashSet for listB so the membership
+        // check is O(1) instead of the O(|listB|) scan performed by List.contains.
+        Set<String> setB = new HashSet<>(listB);
         double intersectionWeight = 0.0;
         for (String item : new HashSet<>(listA)) {
-            if (listB.contains(item)) {
+            if (setB.contains(item)) {
                 intersectionWeight += weights.get(item);
             }
         }
