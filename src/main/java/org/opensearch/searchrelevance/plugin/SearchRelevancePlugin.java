@@ -182,6 +182,7 @@ public class SearchRelevancePlugin extends Plugin
     private SearchRelevanceSettingsAccessor settingsAccessor;
     private ClusterUtil clusterUtil;
     private CronUtil cronUtil;
+    private ScriptService scriptService;
     private InfoStatsManager infoStatsManager;
 
     @Override
@@ -208,6 +209,7 @@ public class SearchRelevancePlugin extends Plugin
     ) {
         this.client = client;
         this.clusterService = clusterService;
+        this.scriptService = scriptService;
         this.searchRelevanceIndicesManager = new SearchRelevanceIndicesManager(clusterService, client);
         this.experimentDao = new ExperimentDao(searchRelevanceIndicesManager);
         this.experimentVariantDao = new ExperimentVariantDao(searchRelevanceIndicesManager);
@@ -220,8 +222,8 @@ public class SearchRelevancePlugin extends Plugin
         this.scheduledExperimentHistoryDao = new ScheduledExperimentHistoryDao(searchRelevanceIndicesManager);
         MachineLearningNodeClient mlClient = new MachineLearningNodeClient(client);
         this.mlAccessor = new MLAccessor(mlClient);
-        SearchRequestBuilder.initialize(xContentRegistry);
         SearchRelevanceExecutor.initialize(threadPool);
+        SearchRequestBuilder.initialize(xContentRegistry, scriptService);
         ExperimentTaskManager experimentTaskManager = new ExperimentTaskManager(
             client,
             evaluationResultDao,
