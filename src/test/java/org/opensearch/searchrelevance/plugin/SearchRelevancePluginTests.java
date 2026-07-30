@@ -48,7 +48,6 @@ import org.opensearch.script.ScriptService;
 import org.opensearch.searchrelevance.dao.EvaluationResultDao;
 import org.opensearch.searchrelevance.dao.ExperimentDao;
 import org.opensearch.searchrelevance.dao.ExperimentVariantDao;
-import org.opensearch.searchrelevance.dao.JudgmentCacheDao;
 import org.opensearch.searchrelevance.dao.JudgmentDao;
 import org.opensearch.searchrelevance.dao.QuerySetDao;
 import org.opensearch.searchrelevance.dao.ScheduledExperimentHistoryDao;
@@ -114,7 +113,6 @@ public class SearchRelevancePluginTests extends OpenSearchTestCase {
         SearchConfigurationDao.class,
         JudgmentDao.class,
         EvaluationResultDao.class,
-        JudgmentCacheDao.class,
         ScheduledJobsDao.class,
         ScheduledExperimentHistoryDao.class,
         MLAccessor.class,
@@ -202,7 +200,7 @@ public class SearchRelevancePluginTests extends OpenSearchTestCase {
     }
 
     public void testTotalRestHandlers() {
-        assertEquals(23, plugin.getRestHandlers(Settings.EMPTY, null, null, null, null, null, null).size());
+        assertEquals(25, plugin.getRestHandlers(Settings.EMPTY, null, null, null, null, null, null).size());
     }
 
     public void testQuerySetTransportIsAdded() {
