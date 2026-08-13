@@ -10,6 +10,7 @@ package org.opensearch.searchrelevance.transport.judgment;
 import static org.opensearch.searchrelevance.common.MLConstants.LLM_JUDGMENT_RATING_TYPE;
 import static org.opensearch.searchrelevance.common.MLConstants.PROMPT_TEMPLATE;
 import static org.opensearch.searchrelevance.common.MetricsConstants.MODEL_ID;
+import static org.opensearch.searchrelevance.common.PluginConstants.UBI_EVENTS_INDEX_PARAM;
 import static org.opensearch.searchrelevance.ubi.UbiValidator.checkUbiEventsIndexExists;
 
 import java.util.ArrayList;
@@ -17,6 +18,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -105,6 +107,14 @@ public class PutJudgmentTransportAction extends HandledTransportAction<PutJudgme
                     llmRequest,
                     ActionListener.wrap(v -> { createJudgment(request, listener); }, listener::onFailure)
                 );
+            } else if (request.getType() == JudgmentType.UBI_JUDGMENT) {
+                PutUbiJudgmentRequest ubiRequest = (PutUbiJudgmentRequest) request;
+                String ubiEventsIndex = ubiRequest.getUbiEventsIndex();
+                if (!checkUbiEventsIndexExists(clusterService, ubiEventsIndex)) {
+                    listener.onFailure(invalidUbiEventsIndexException(ubiEventsIndex, ubiRequest.isUbiEventsIndexProvided()));
+                    return;
+                }
+                createJudgment(request, listener);
             } else {
                 createJudgment(request, listener);
             }
@@ -112,6 +122,35 @@ public class PutJudgmentTransportAction extends HandledTransportAction<PutJudgme
             LOGGER.error("Failed to process judgment request", e);
             listener.onFailure(new SearchRelevanceException("Failed to process judgment request", e, RestStatus.INTERNAL_SERVER_ERROR));
         }
+    }
+
+    private static SearchRelevanceException invalidUbiEventsIndexException(String ubiEventsIndex, boolean ubiEventsIndexProvided) {
+        String requiredFields = "query_id, action_name, event_attributes.object.object_id";
+        String message;
+        if (ubiEventsIndexProvided) {
+            message = String.format(
+                Locale.ROOT,
+                "The UBI events index [%s] set by the '%s' parameter does not exist or is missing required UBI event "
+                    + "fields (%s). Ingest UBI events data into it, or set the '%s' parameter to an existing UBI events index.",
+                ubiEventsIndex,
+                UBI_EVENTS_INDEX_PARAM,
+                requiredFields,
+                UBI_EVENTS_INDEX_PARAM
+            );
+        } else {
+            message = String.format(
+                Locale.ROOT,
+                "No '%s' parameter was provided and the default UBI events index [%s] does not exist or is missing "
+                    + "required UBI event fields (%s). Ingest UBI events data into [%s], or set the '%s' parameter to an "
+                    + "existing UBI events index.",
+                UBI_EVENTS_INDEX_PARAM,
+                ubiEventsIndex,
+                requiredFields,
+                ubiEventsIndex,
+                UBI_EVENTS_INDEX_PARAM
+            );
+        }
+        return new SearchRelevanceException(message, RestStatus.BAD_REQUEST);
     }
 
     private void createJudgment(PutJudgmentRequest request, ActionListener<IndexResponse> listener) {
@@ -401,9 +440,6 @@ public class PutJudgmentTransportAction extends HandledTransportAction<PutJudgme
             }
             case UBI_JUDGMENT -> {
                 PutUbiJudgmentRequest ubiRequest = (PutUbiJudgmentRequest) request;
-                if (!checkUbiEventsIndexExists(clusterService, ubiRequest.getUbiEventsIndex())) {
-                    throw new SearchRelevanceException("UBI events index does not exist", RestStatus.CONFLICT);
-                }
                 metadata.put("clickModel", ubiRequest.getClickModel());
                 metadata.put("maxRank", ubiRequest.getMaxRank());
                 metadata.put("startDate", ubiRequest.getStartDate());
